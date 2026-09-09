@@ -1,0 +1,48 @@
+PLAYER PERFORMANCE
+Scott
+Notts County
+Match Rating
+Cuthbert
+7.7
+68
+OVR
+·CB
+ATTACKING
+DEFENDING
+0%
+TACKLING
+SHOOTING
+50%
+Goals
+Won/Lost
+1/1
+0/0
+On/Off Target
+Fouls
+PASSES
+88%
+Penalties Conceded
+Assists
+POSITIONING
+Completed: Short/Medium/Long
+Interceptions/Blocks
+7/1/0
+3/0
+FIFA.
+Failed:Short/Medium/Long
+0/1/0
+Out of Position
+Key Passes
+BALL RETENTION
+0/0
+PossessionWon/Lost
+Crosses:Successful/Failed
+5/2
+MOVEMENT
+Clearances
+Key Dribbles
+Headers Won/Lost
+4/0
+Fouled
+Successful 1 on 1 Dribbles
+Esc Back

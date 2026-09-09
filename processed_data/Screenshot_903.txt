@@ -1,0 +1,47 @@
+PLAYER PERFORMANCE
+Ethan
+Notts County
+Match Rating
+Ampadu
+7.4
+66
+OVR
+·CB
+ATTACKING
+DEFENDING
+0%
+TACKLING
+SHOOTING
+50%
+Goals
+Won/Lost
+1/1
+0/0
+Fouls
+On/Off Target
+PASSES
+85%
+Penalties Conceded
+Assists
+POSITIONING
+Completed: Short/Medium/Long
+3/2/1
+Interceptions/Blocks
+1/0
+Failed:Short/Medium/Long
+0/1/0
+Out of Position
+Key Passes
+BALL RETENTION
+0/0
+PossessionWon/Lost
+Crosses:Successful/Failed
+2/0
+MOVEMENT
+Clearances
+Key Dribbles
+Headers Won/Lost
+2/2
+Fouled
+Successful 1 on 1 Dribbles
+Esc Back

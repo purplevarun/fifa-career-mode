@@ -1,0 +1,47 @@
+PLAYER PERFORMANCE
+Andy
+Notts County
+Match Rating
+King
+8.7
+71
+OVR
+●CM
+ATTACKING
+DEFENDING
+66%
+TACKLING
+SHOOTING
+100%
+Goals
+Won/Lost
+1/0
+On/Off Target
+2/1
+Fouls
+PASSES
+100%
+Penalties Conceded
+Assists
+POSITIONING
+Interceptions/Blocks
+17/0/0
+Completed:Short/Medium/Long
+0/1
+Failed:Short/Medium/Long
+0/0/0
+Out of Position
+Key Passes
+BALL RETENTION
+0/0
+PossessionWon/Lost
+Crosses:Successful/Failed
+1/5
+MOVEMENT
+Clearances
+Headers Won/Lost
+Key Dribbles
+0/2
+Fouled
+Successful 1 on 1 Dribbles
+Esc Back

@@ -1,0 +1,47 @@
+PLAYER PERFORMANCE
+Thembinkosi
+Notts County
+Match Rating
+Lorch
+7.1
+66
+OVR
+●LW
+ATTACKING
+DEFENDING
+0%
+SHOOTING
+TACKLING
+0%
+Goals
+Won/Lost
+0/0
+0/0
+On/Off Target
+Fouls
+PASSES
+66%
+Penalties Conceded
+Assists
+POSITIONING
+Completed: Short/Medium/Long
+Interceptions/Blocks
+4/0/0
+0/0
+Failed:Short/Medium/Long
+2/0/0
+Out of Position
+Key Passes
+BALL RETENTION
+0/3
+PossessionWon/Lost
+Crosses:Successful/Failed
+0/2
+MOVEMENT
+Clearances
+Headers Won/Lost
+Key Dribbles
+1/3
+Fouled
+Successful 1 on 1 Dribbles
+Esc Back

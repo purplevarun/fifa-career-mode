@@ -1,0 +1,46 @@
+PLAYER PERFORMANCE
+Erling Braut
+Notts County
+Match Rating
+Haaland
+8.9
+69
+OVR
+ATTACKING
+DEFENDING
+TACKLING
+50%
+SHOOTING
+100%
+Goals
+Won/Lost
+2/0
+1/1
+On/Off Target
+Fouls
+PASSES
+92%
+Penalties Conceded
+Assists
+POSITIONING
+Completed:Short/Medium/Long
+12/0/0
+Interceptions/Blocks
+1/0
+Failed:Short/Medium/Long
+1/0/0
+Out of Position
+Key Passes
+BALL RETENTION
+0/0
+PossessionWon/Lost
+Crosses:Successful/Failed
+0/1
+MOVEMENT
+Clearances
+Headers Won/Lost
+Key Dribbles
+0/3
+Fouled
+Successful1 on 1Dribbles
+Esc Back

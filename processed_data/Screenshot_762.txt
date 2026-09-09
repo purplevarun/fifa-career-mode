@@ -1,0 +1,49 @@
+PLAYER PERFORMANCE
+Danny
+Notts County
+Match Rating
+Williams
+7.5
+71
+OVR
+●CM
+ATTACKING
+DEFENDING
+0%
+TACKLING
+SHOOTING
+0%
+Won/Lost
+Goals
+0/1
+On/Off Target
+0/0
+Fouls
+PASSES
+94%
+PenaltiesConceded
+Assists
+POSITIONING
+Completed: Short/Medium/Long
+Interceptions/Blocks
+13/4/1
+2/0
+Failed:Short/Medium/Long
+0/1/0
+Out of Position
+Key Passes
+BALL RETENTION
+0/0
+Possession Won/Lost
+Crosses:Successful/Failed
+0/4
+EASPORTSFIFA
+Clearances
+MOVEMENT
+IFA
+Headers Won/Lost
+Key Dribbles
+0/0
+Fouled
+Successful 1 on 1 Dribbles
+Esc Back

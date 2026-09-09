@@ -1,0 +1,84 @@
+·ATT
+· DEF
+20
++ MID
+• GK
+CAREER >SQUADHUB
+STATUS
+STATS
+ATTRIBUTES
+FINANCIAL
+No.
+Posv
+OVR
+Role
+Form
+Name
+Morale
+PLAYEROVERVIEW&STATUS
+56
+Sporadic
+33
+LB
+V. Neufville
+Erling Braut
+OVR
+Haaland
+67
+0.Skipp
+CDM
+61
+16
+Rotation
+● ST I Age 17 I Norway
+RM
+14
+N. Delfouneso
+63
+Important
+Squad Role
+Crucial
+A. King
+CM
+71
+Crucial
+Status
+D.Williams
+CM
+71
+Crucial
+Contract Expiring in 12 Months
+E. Hewitt
+CM
+62
+Form
+18
+Important
+Okay
+CAM
+10
+T. Kubo
+63
+Important
+Morale
+Happy
+R. Nelson
+RW
+65
+Important
+Injury
+Match Fit
+67
+Crucial
+ST
+E. Haaland
+Suspension
+Match Fit
+LW
+T. Lorch
+65
+Important
+Back
+Show actions
+ESC
+Sort
