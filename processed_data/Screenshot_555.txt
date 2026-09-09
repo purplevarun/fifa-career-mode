@@ -1,0 +1,48 @@
+70
+PLAYER PERFORMANCE
+Steven
+Match Rating
+Notts County
+Sessegnon
+7.1
+58
+OVR
+●RB
+ATTACKING
+DEFENDING
+0%
+TACKLING
+SHOOTING
+0%
+Goals
+Won/Lost
+0/0
+0/0
+On/Off Target
+Fouls
+PASSES
+87%
+Penalties Conceded
+Assists
+POSITIONING
+Completed: Short/Medium/Long
+6/1/0
+Interceptions/Blocks
+1/0
+1/0/0
+Failed: Short/Medium/Long
+Out of Position
+Key Passes
+BALL RETENTION
+0/0
+PossessionWon/Lost
+Crosses:Successful/Failed
+2/0
+MOVEMENT
+Clearances
+Key Dribbles
+Headers Won/Lost
+0/0
+Fouled
+Successful 1 on 1 Dribbles
+Esc Back

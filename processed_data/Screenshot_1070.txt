@@ -1,0 +1,86 @@
+·ATT
+· DEF
+20
++ MID
+· GK
+CAREER >SQUAD HUB
+STATUS
+STATS
+ATTRIBUTES
+FINANCIAL
+PosV
+Name
+App
+Goals
+Assists
+Clean Sheets
+STATS
+49
+14
+CB
+S. Cuthbert
+Andy
+OVR
+King
+70
+CB
+41
+..Ampadu
+13
+CM I Age 30
+Wales
+CB
+J.Gorenc Stankovic
+26
+Club Competitians
+APP
+YC
+RC
+47
+12
+LB
+C. Elder
+AVG
+European Int'l Cup
+7.70
+V. Neufville
+22
+LB
+11
+42
+EFL League Two
+13
+7.80
+CDM
+0. Skipp
+42
+10
+Carabao Cup
+8.30
+RM
+N. Delfouneso
+38
+Checkatrade Trophy
+7.90
+The Emirates FA Cup
+D. williams
+59
+11
+19
+CM
+7.90
+Totals
+54
+17
+17
+7.80
+A. King
+54
+17
+17
+CM
+46
+E. Hewitt
+Esc Back
+Showactions
+Sort

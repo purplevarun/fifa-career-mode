@@ -1,0 +1,49 @@
+72
+PLAYER PERFORMANCE
+we
+Andy
+Notts County
+Match Rating
+King
+9.6
+71
+OVR
+ATTACKING
+DEFENDING
+100%
+TACKLING
+SHOOTING
+100%
+Goals
+Won/Lost
+1/0
+2/0
+On/Off Target
+Fouls
+CA SPORTS
+PASSES
+91%
+Penalties Conceded
+Assists
+POSITIONING
+Completed: Short/Medium/Long
+Interceptions/Blocks
+8/3/0
+2/0
+0/1/0
+Failed: Short/Medium/Long
+Out of Position
+Key Passes
+BALL RETENTION
+0/0
+PossessionWon/Lost
+Crosses:Successful/Failed
+2/4
+MOVEMENT
+Clearances
+Key Dribbles
+Headers Won/Lost
+1/2
+Fouled
+Successful 1 on 1 Dribbles
+Esc Back

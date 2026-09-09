@@ -1,0 +1,92 @@
+·ATT
+· DEF
+20
++ MID
+• GK
+CAREER >SQUAD HUB
+STATUS
+STATS
+ATTRIBUTES
+FINANCIAL
+Posv
+Name
+App
+Goals
+Assists
+Clean Sheets
+STATS
+0.Skipp
+Emile
++5
+42
+CDM
+10
+OVR
+Smith Rowe
+65
+N.Delfouneso
+38
+RM
+JAKE
+LW/RW I Age 18 I England
+BUGG
+D. Williams
+CM
+69
+11
+19
+APP
+CS
+YC
+RC
+Club Competitions
+A. King
+54
+17
+17
+CM
+AVG
+European Int'l Cup
+7.00
+E. Hewitt
+CM
+46
+25
+EFL League Two
+7.00
+CAM
+51
+T. Kubo
+21
+21
+18
+Carabao Cup
+R. Nelson
+RW
+48
+10
+14
+Checkatrade Trophy
+8.20
+The Emirates FA Cup
+E. Haaland
+52
+13
+23
+13
+ST
+6.80
+Totals
+32
+7.10
+LW
+T. Lorch
+42
+10
+13
+LW
+E. Smith Rowe
+32
+Esc Back
+Show actions
+Sort

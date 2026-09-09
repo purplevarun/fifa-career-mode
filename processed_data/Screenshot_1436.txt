@@ -1,0 +1,36 @@
+PLAYER PERFORMANCE
+Frederik
+Notts County
+Match Rating
+Schram
+7.3
+58
+OVR
+·GK
+PASSES
+GOALKEEPING
+60%
+Assists
+Goals Conceded
+Completed:Short/Medium/Long
+3/3
+1/0/2
+Shots Caught/Parried
+Failed: Short/Medium/Long
+0/0/2
+Crosses Caught
+Key Passes
+Balls Stripped
+Crosses:Successful/Failed
+0/0
+POSITIONING
+Interceptions/Blocks
+0/0
+Out of Position
+BALL RETENTION
+PossessionWon/Lost
+3/3
+Clearances
+Headers Won/Lost
+0/0
+ESC Back

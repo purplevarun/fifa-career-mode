@@ -1,0 +1,50 @@
+PLAYER PERFORMANCE
+we
+Reiss
+Notts County
+Match Rating
+Nelson
+7.3
+70
+OVR
+●RW
+ATTACKING
+DEFENDING
+0%
+TACKLING
+SHOOTING
+0%
+Goals
+Won/Lost
+0/1
+0/0
+On/Off Target
+Fouls
+PASSES
+80%
+Penalties Conceded
+Assists
+POSITIONING
+Completed: Short/Medium/Long
+3/0/1
+Interceptions/Blocks
+0/0
+Failed:Short/Medium/Long
+1/0/0
+Out of Position
+Key Passes
+BALL RETENTION
+0/2
+PossessionWon/Lost
+Crosses:Successful/Failed
+0/1
+MOVEMENT
+Clearances
+Key Dribbles
+Headers Won/Lost
+0/1
+Fouled
+EASPO
+VISIT
+Successful 1 on 1 Dribbles
+EsC Back

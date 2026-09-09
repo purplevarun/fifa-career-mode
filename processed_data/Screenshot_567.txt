@@ -1,0 +1,36 @@
+PLAYER PERFORMANCE
+Aaron
+Notts County
+Match Rating
+Ramsdale
+7.0
+64
+OVR
+●GK
+PASSES
+GOALKEEPING
+100%
+Assists
+Goals Conceded
+Completed:Short/Medium/Long
+3/0
+1/2/2
+Shots Caught/Parried
+Failed: Short/Medium/Long
+0/0/0
+Crosses Caught
+Key Passes
+Balls Stripped
+Crosses:Successful/Failed
+0/0
+POSITIONING
+Interceptions/Blocks
+0/0
+Out of Position
+BALL RETENTION
+PossessionWon/Lost
+3/0
+Clearances
+Headers Won/Lost
+0/0
+Esc Back

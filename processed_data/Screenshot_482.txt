@@ -1,0 +1,47 @@
+PLAYER PERFORMANCE
+Oliver
+Notts County
+Match Rating
+Skipp
+8.3
+62
+OVR
+●CDM
+ATTACKING
+DEFENDING
+0%
+TACKLING
+SHOOTING
+100%
+Goals
+Won/Lost
+1/0
+On/Off Target
+0/0
+Fouls
+PASSES
+90%
+Penalties Conceded
+Assists
+POSITIONING
+Completed: Short/Medium/Long
+Interceptions/Blocks
+16/4/0
+2/0
+Failed:Short/Medium/Long
+2/0/0
+Out of Position
+Key Passes
+BALL RETENTION
+0/0
+PossessionWon/Lost
+Crosses:Successful/Failed
+3/4
+MOVEMENT
+Clearances
+Key Dribbles
+Headers Won/Lost
+1/0
+Fouled
+Successful 1 on 1 Dribbles
+Esc Back

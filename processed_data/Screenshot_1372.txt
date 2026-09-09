@@ -1,0 +1,49 @@
+PLAYER PERFORMANCE
+we
+Leo
+Notts County
+Match Rating
+Ostigard
+6.9
+66
+OVR
+●CB
+ATTACKING
+DEFENDING
+0%
+SHOOTING
+TACKLING
+0%
+Goals
+Won/Lost
+0/2
+0/0
+Fouls
+On/Off Target
+EFL
+PASSES
+100%
+Penalties Conceded
+Assists
+POSITIONING
+Completed: Short/Medium/Long
+Interceptions/Blocks
+4/0/0
+0/1
+Failed:Short/Medium/Long
+0/0/0
+Out of Position
+Key Passes
+BALL RETENTION
+0/0
+PossessionWon/Lost
+Crosses:Successful/Failed
+2/0
+MOVEMENT
+Clearances
+Key Dribbles
+Headers Won/Lost
+1/1
+Fouled
+Successful 1 on 1 Dribbles
+Esc Back

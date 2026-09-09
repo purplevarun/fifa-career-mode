@@ -1,0 +1,48 @@
+PLAYER PERFORMANCE
+we
+Takefusa
+Notts County
+Match Rating
+RA
+Kubo
+7.9
+OVR
+●CAM
+ATTACKING
+DEFENDING
+0%
+SHOOTING
+TACKLING
+0%
+Goals
+Won/Lost
+0/0
+On/Off Target
+0/1
+Fouls
+PASSES
+87%
+PenaltiesConceded
+Assists
+POSITIONING
+Completed: Short/Medium/Long
+Interceptions/Blocks
+7/0/0
+1/1
+Failed:Short/Medium/Long
+1/0/0
+Out of Position
+Key Passes
+BALL RETENTION
+0/1
+Possession Won/Lost
+Crosses:Successful/Failed
+0/7
+MOVEMENT
+Clearances
+Headers Won/Lost
+Key Dribbles
+1/3
+Fouled
+Successful 1 on 1 Dribbles
+Esc Back

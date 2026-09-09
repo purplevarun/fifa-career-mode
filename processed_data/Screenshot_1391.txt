@@ -1,0 +1,49 @@
+PLAYER PERFORMANCE
+we
+Matty
+Notts County
+Match Rating
+James
+7.1
+73
+OVR
+●CM
+ATTACKING
+DEFENDING
+0%
+TACKLING
+SHOOTING
+50%
+Goals
+Won/Lost
+1/1
+On/Off Target
+0/0
+Fouls
+PASSES
+92%
+Penalties Conceded
+Assists
+POSITIONING
+Completed: Short/Medium/Long
+10/3/0
+Interceptions/Blocks
+1/0
+Failed:Short/Medium/Long
+1/0/0
+Out of Position
+Key Passes
+BALL RETENTION
+0/0
+PossessionWon/Lost
+Crosses:Successful/Failed
+2/4
+MOVEMENT
+Clearances
+Origin
+Headers Won/Lost
+Key Dribbles
+0/1
+Fouled
+Successful 1 on 1 Dribbles
+Esc Back

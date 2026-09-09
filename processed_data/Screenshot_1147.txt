@@ -1,0 +1,50 @@
+PLAYER PERFORMANCE
+Steven
+Notts County
+Match Rating
+Sessegnon
+7.2
+60
+OVR
+●RB
+1862
+TSCOUNTY
+KBURN
+ATTACKING
+DEFENDING
+0%
+TACKLING
+SHOOTING
+25%
+Goals
+Won/Lost
+1/3
+0/0
+On/Off Target
+Fouls
+PASSES
+100%
+PenaltiesConceded
+Assists
+POSITIONING
+Completed: Short/Medium/Long
+Interceptions/Blocks
+5/1/0
+0/0
+Failed:Short/Medium/Long
+0/0/0
+Out of Position
+Key Passes
+BALL RETENTION
+0/0
+PossessionWon/Lost
+Crosses:Successful/Failed
+3/2
+MOVEMENT
+Clearances
+Key Dribbles
+Headers Won/Lost
+0/0
+Fouled
+Successful 1 on 1 Dribbles
+Esc Back

@@ -1,0 +1,48 @@
+PLAYER PERFORMANCE
+Elliott
+Notts County
+Match Rating
+Hewitt
+9.3
+62
+OVR
+●CM
+ATTACKING
+DEFENDING
+33%
+TACKLING
+SHOOTING
+50%
+Goals
+Won/Lost
+1/1
+1/2
+On/Off Target
+Fouls
+PASSES
+90%
+PenaltiesConceded
+Assists
+POSITIONING
+Completed: Short/Medium/Long
+Interceptions/Blocks
+6/4/0
+0/0
+Failed:Short/Medium/Long
+1/0/0
+Out of Position
+Key Passes
+BALL RETENTION
+0/0
+Possession Won/Lost
+Crosses:Successful/Failed
+3/3
+MOVEMENT
+Clearances
+Key Dribbles
+Headers Won/Lost
+1/1
+Fouled
+Successful 1 on 1 Dribbles
+[ESC]
+Back

@@ -1,0 +1,48 @@
+PLAYER PERFORMANCE
+Jon
+Notts County
+Match Rating
+Gorenc Stankovic
+7.4
+62
+OVR
+●CB
+ATTACKING
+DEFENDING
+0%
+TACKLING
+SHOOTING
+50%
+Goals
+Won/Lost
+1/1
+0/0
+Fouls
+On/Off Target
+PASSES
+90%
+PenaltiesConceded
+Assists
+POSITIONING
+Completed: Short/Medium/Long
+5/5/0
+Interceptions/Blocks
+1/0
+Failed:Short/Medium/Long
+0/0/1
+Out of Position
+IVING
+Key Passes
+BALL RETENTION
+0/0
+Possession Won/Lost
+Crosses:Successful/Failed
+5/1
+MOVEMENT
+Clearances
+Key Dribbles
+HeadersWon/Lost
+2/2
+Fouled
+Successful 1 on 1 Dribbles
+[Esc Back

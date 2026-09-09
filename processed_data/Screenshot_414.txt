@@ -1,0 +1,48 @@
+69
+PLAYER PERFORMANCE
+Vashon
+Notts County
+Match Rating
+Neufville
+7.1
+57
+OVR
+O LB
+ATTACKING
+DEFENDING
+0%
+SHOOTING
+TACKLING
+50%
+Goals
+Won/Lost
+1/1
+On/Off Target
+0/0
+Fouls
+PASSES
+75%
+PenaltiesConceded
+Assists
+POSITIONING
+Completed: Short/Medium/Long
+4/2/0
+Interceptions/Blocks
+1/0
+Failed: Short/Medium/Long
+2/0/0
+Out of Position
+Key Passes
+BALL RETENTION
+Crosses: Successful/Failed
+0/1
+PossessionWon/Lost
+2/3
+MOVEMENT
+Clearances
+Key Dribbles
+Headers Won/Lost
+0/0
+Fouled
+Successful 1 on 1 Dribbles
+EsC Back

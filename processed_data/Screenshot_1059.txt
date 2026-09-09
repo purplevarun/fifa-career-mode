@@ -1,0 +1,81 @@
+·ATT
+· DEF
+20
++MID
+· GK
+CAREER >SQUAD HUB
+STATUS
+STATS
+ATTRIBUTES
+FINANCIAL
+Posv
+Name
+App
+Goals
+Assists
+Clean Sheets
+STATS
+18
+53
+GK
+A. Ramsdale
+Darnell
++2
+OVR
+Johnson
+62
+F. Schram
+GK
+RB/CB IAge 20 I England
+D. Johnson
+41
+RB
+16
+Club Competitians
+APP
+CS
+YC
+RC
+S.Sessegnon
+RB
+18
+AVG
+European Int'l Cup
+CB
+Ostigard
+30
+7.20
+EFL League Two
+13
+7.40
+CB
+S. Cuthbert
+49
+14
+Carabao Cup
+E. Ampadu
+CB
+41
+13
+Checkatrade Trophy
+7.40
+J.Gorenc Stankovic
+26
+CB
+The Emirates FA Cup
+7.50
+Totals
+41
+16
+C. Elder
+LB
+47
+12
+7.40
+LB
+V. Neufville
+22
+11
+Esc Back
+Show actions
+Sort

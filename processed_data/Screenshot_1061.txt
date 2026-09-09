@@ -1,0 +1,81 @@
+·ATT
+· DEF
+20
++ MID
+· GK
+CAREER >SQUAD HUB
+STATUS
+STATS
+ATTRIBUTES
+FINANCIAL
+Posv
+Name
+App
+Goals
+Assists
+Clean Sheets
+STATS
+18
+53
+GK
+A. Ramsdale
++3
+Leo
+OVR
+Ostigard
+64
+F. Schram
+GK
+CB / Age 19 I
+Norway
+RB
+41
+D. Johnson
+16
+S. Sessegnon
+Club Competitians
+APP
+YC
+RC
+RB
+18
+AVG
+European Int'l Cup
+30
+.. Ostigard
+6.00
+CB
+EFL League Two
+19
+7.10
+CB
+S. Cuthbert
+49
+14
+Carabao Cup
+7.20
+E.Ampadu
+41
+CB
+13
+Checkatrade Trophy
+7.00
+J.Gorenc Stankovic
+CB
+26
+The Emirates FA Cup
+7.70
+Totals
+30
+C. Elder
+LB
+47
+12
+7.00
+V. Neufville
+22
+LB
+11
+Esc Back
+Show actions
+Sort

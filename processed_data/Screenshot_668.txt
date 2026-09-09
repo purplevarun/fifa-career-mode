@@ -1,0 +1,48 @@
+PLAYER PERFORMANCE
+9000
+we
+Emile
+Notts County
+Match Rating
+Smith Rowe
+6.9
+63
+OVR
+ATTACKING
+DEFENDING
+TACKLING
+0%
+SHOOTING
+100%
+Goals
+Won/Lost
+1/0
+0/1
+On/Off Target
+Fouls
+PASSES
+100%
+PenaltiesConceded
+Assists
+POSITIONING
+Completed: Short/Medium/Long
+Interceptions/Blocks
+5/1/0
+0/0
+Failed:Short/Medium/Long
+0/0/0
+Out of Position
+Key Passes
+BALL RETENTION
+0/1
+Crosses:Successful/Failed
+PossessionWon/Lost
+2/3
+MOVEMENT
+Clearances
+Key Dribbles
+Headers Won/Lost
+0/2
+Fouled
+Successful 1 on 1 Dribbles
+Esc Back

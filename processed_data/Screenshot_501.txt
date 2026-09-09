@@ -1,0 +1,49 @@
+69
+PLAYER PERFORMANCE
+we
+Callum
+Notts County
+Match Rating
+Elder
+66
+6.7
+OVR
+LB
+ATTACKING
+DEFENDING
+0%
+SHOOTING
+TACKLING
+0%
+Goals
+Won/Lost
+0/2
+0/0
+On/Off Target
+Fouls
+PASSES
+100%
+Penalties Conceded
+Assists
+POSITIONING
+Completed: Short/Medium/Long
+4/2/0
+Interceptions/Blocks
+1/0
+0/0/0
+Failed:Short/Medium/Long
+Out of Position
+Key Passes
+BALL RETENTION
+0/1
+Crosses:Successful/Failed
+PossessionWon/Lost
+1/2
+MOVEMENT
+Clearances
+Key Dribbles
+Headers Won/Lost
+1/1
+Fouled
+Successful 1 on 1 Dribbles
+ESC Back

@@ -1,0 +1,46 @@
+PLAYER PERFORMANCE
+Nathan
+Notts County
+Match Rating
+Delfouneso
+7.8
+63
+OVR
+ATTACKING
+DEFENDING
+0%
+TACKLING
+SHOOTING
+0%
+Goals
+Won/Lost
+0/1
+0/0
+On/Off Target
+Fouls
+PASSES
+85%
+Penalties Conceded
+Assists
+POSITIONING
+Completed: Short/Medium/Long
+2/3/1
+Interceptions/Blocks
+1/0
+Failed:Short/Medium/Long
+1/0/0
+Out of Position
+Key Passes
+BALL RETENTION
+1/0
+PossessionWon/Lost
+Crosses:Successful/Failed
+2/1
+MOVEMENT
+Clearances
+Key Dribbles
+Headers Won/Lost
+0/1
+Fouled
+Successful 1 on 1 Dribbles
+Esc Back

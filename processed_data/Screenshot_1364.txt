@@ -1,0 +1,49 @@
+PLAYER PERFORMANCE
+Darnell
+Notts County
+Match Rating
+Johnson
+64
+6.7
+OVR
+●RB
+ATTACKING
+DEFENDING
+0%
+TACKLING
+SHOOTING
+100%
+Goals
+Won/Lost
+1/0
+0/0
+On/Off Target
+Fouls
+PASSES
+100%
+Penalties Conceded
+Assists
+POSITIONING
+1/1/0
+Interceptions/Blocks
+Completed:Short/Medium/Long
+0/0
+IFA
+Failed:Short/Medium/Long
+0/0/0
+Out of Position
+DC
+Key Passes
+BALL RETENTION
+0/0
+PossessionWon/Lost
+Crosses:Successful/Failed
+3/1
+MOVEMENT
+Clearances
+Key Dribbles
+Headers Won/Lost
+0/1
+Fouled
+Successful 1 on 1 Dribbles
+Esc Back

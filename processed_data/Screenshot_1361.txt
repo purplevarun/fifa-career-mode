@@ -1,0 +1,46 @@
+PLAYER PERFORMANCE
+Dominic
+Notts County
+Match Rating
+Calvert-Lewin
+8.4
+77
+OVR
+ATTACKING
+DEFENDING
+0%
+TACKLING
+SHOOTING
+0%
+Goals
+Won/Lost
+0/0
+On/Off Target
+0/0
+Fouls
+PASSES
+100%
+Penalties Conceded
+Assists
+POSITIONING
+Interceptions/Blocks
+6/0/0
+Completed:Short/Medium/Long
+0/0
+Failed:Short/Medium/Long
+0/0/0
+Out of Position
+Key Passes
+BALL RETENTION
+0/0
+Possession Won/Lost
+Crosses:Successful/Failed
+0/1
+MOVEMENT
+Clearances
+Key Dribbles
+Headers Won/Lost
+0/1
+Fouled
+Successful1 on 1Dribbles
+Esc Back
