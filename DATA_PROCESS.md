@@ -17,6 +17,7 @@ Build a trustworthy career dataset for a React application that visualizes Notts
 - Implemented storage: SQLite contains image inventory, structured OCR evidence, review history, and canonical records. JSON exports are a read-only copy for React; editable review JSON is an interchange format, not a second authoritative database.
 - On the user's 2026-09-10 instruction, the obsolete text-only OCR script and all 1,296 generated text files were removed. All 1,296 original screenshots are preserved. The replacement never reads the retired text pipeline.
 - Build and validate the data pipeline before building the React application. A static JSON-backed app can come first; an editing API can come later.
+- The first read-only Vite/React application is in `web/`. It reads `web/public/data/career.json`, which is regenerated from SQLite by `npm run sync-data`; it does not connect to SQLite in the browser.
 
 Scope initially covers this one career save. If another save is added, introduce explicit career scoping before mixing records.
 
@@ -288,6 +289,7 @@ data/
   exports/career.json         derived read-only dataset for React
   exports/coverage.json       reproducible per-match coverage report
   exports/reconciliation-2018-19.json   first-season cumulative comparison report
+web/                         Vite/React read-only visual explorer
   backups/                   consistent local SQLite backup copies
 ```
 
@@ -370,6 +372,7 @@ CAREER_OCR_TESTS=1 python3 -m unittest discover -s tests -v
 - `export` regenerates `data/exports/career.json`, including UUID IDs/references, real boolean preseason flags, source hashes, coverage counts, `match_coverage`, and `season_reconciliation`. React can fetch this JSON without opening SQLite in the browser.
 - `report` provides source-link coverage, per-fixture core-player and team-stat completeness, competition result summaries, selected detailed-field availability, and reconciliation warnings. It is read-only. Unknown scores do not become draws, and null fields do not become zeroes. Use `--club` to change the club scope; the default is Notts County.
 - `reconcile` compares captured cumulative player observations with same-scope reviewed appearances, goals, assists, and average ratings. It is read-only and preserves both observed and derived values. `--season` limits the report; `--club` selects a club; `--rating-decimals` changes the displayed truncation precision when supported by evidence. Missing match values are not comparable, and no data is changed to make a comparison pass.
+- `web` is a static read-only React view of the export. Run `cd web && npm run dev` to browse overview, fixtures, players, competitions, verification, source images and every exported table. Run `npm run sync-data` after approved SQLite changes. See [web/README.md](web/README.md).
 - `--reextract` refreshes machine candidates but never canonical records or reviewed corrections. Unsupported layouts and extraction errors remain visible for follow-up.
 - `backup` uses SQLite's backup API and refuses an existing destination. Use a new name for each checkpoint. The current copy is `data/backups/2026-09-10-uuid-season-totals.sqlite`. The UUID migration also created a timestamped `career-before-uuid-*.sqlite` backup before any schema changes. Older integer-ID backups are historical snapshots, not current application data.
 - The default test command skips six real-image OCR tests. Setting `CAREER_OCR_TESTS=1` runs all 51 tests against original images and temporary databases. The complete suite also passed with `-W error::ResourceWarning`.
@@ -451,6 +454,7 @@ For subsequent detailed-stat work, add only newly verified fields to the current
 - Existing transfer/event examples remain unchanged: Matty James' permanent arrival, Dominic Calvert-Lewin's loan, Notts County's League Two title, and Ramsdale's goalkeeper award. Other transfers, career events, and financial/date details still need separate review.
 - Review decisions: `data/archive-review.json` and `data/season-end-review.json` are retained for version control. Approved payloads, chronological review revisions, correction history, hashes, and OCR evidence live in SQLite. Scratch contact sheets and old review documents remain under ignored `data/review/`.
 - Verification: all 51 tests passed, including six image tests and migration rollback; all canonical UUIDs and foreign references validated; the migration preserved all preexisting table counts and player statistics; fresh inventory found no new images after changing source IDs; all three archive batches and the 20-source season batch replay unchanged. Every structured review reference was checked after migration, and the old 1,162-source numeric/hash-ID review still replays without duplicates.
+- UI verification: the Vite production build, data tests and lint pass. The integrated browser verified filters, mobile navigation, fixture shootout display, player season totals, source screenshot loading and no horizontal overflow. The standalone Playwright runner is included but cannot launch here because managed Chrome debugging is blocked and downloading its alternate browser is blocked by the corporate proxy.
 - Commit checkpoints: initial importer `39856c5`, full-match data `9b6f1d1`, UUID migration `d4ccf13`, and first-season extraction/reconciliation `28530e1`. This handoff accompanies the separate reviewed-data checkpoint. All commits are local; no push was performed.
 
 ### Exact next work
