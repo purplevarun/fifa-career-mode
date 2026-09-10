@@ -11,6 +11,7 @@ from pathlib import Path
 from . import EXTRACTOR_VERSION, SCHEMA_VERSION
 from .database import EXPORT_TABLES, coverage_report, image_hash, insert_entity, json_text, status, validate_database
 from .identifiers import is_uuid, normalize_references
+from .reconciliation import reconcile_totals
 
 
 BOOLEAN_FIELDS = {"is_preseason", "extra_time", "started"}
@@ -457,7 +458,8 @@ def export_data(connection, output_path):
     if errors:
         raise ValueError("Cannot export an invalid database: " + "; ".join(errors))
     data = {"schema_version": SCHEMA_VERSION, "generated_at": datetime.now(timezone.utc).isoformat(),
-            "coverage": status(connection), "match_coverage": coverage_report(connection)}
+            "coverage": status(connection), "match_coverage": coverage_report(connection),
+            "season_reconciliation": reconcile_totals(connection)}
     for table in EXPORT_TABLES:
         ordering = "1, 2" if table.endswith("_sources") else "id"
         rows = [dict(row) for row in connection.execute(f"SELECT * FROM {table} ORDER BY {ordering}")]

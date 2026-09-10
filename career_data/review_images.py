@@ -23,15 +23,37 @@ def crop_region(image, bounds):
                        round(bounds[3] * image.height / 768)))
 
 
+def make_squad_sheets(rows, root, output):
+    results = []
+    for offset in range(0, len(rows), 6):
+        page = rows[offset:offset + 6]
+        sheet = Image.new("RGB", (1120, 590 * ((len(page) + 1) // 2)), "#ececec")
+        draw = ImageDraw.Draw(sheet)
+        for index, row in enumerate(page):
+            left, top = (index % 2) * 560, (index // 2) * 590
+            draw.text((left + 10, top + 5), f"Screenshot {row['sequence']}", fill="black", font=font(19))
+            with Image.open(root / row["path"]) as image:
+                region = crop_region(image.convert("RGB"), (695, 236, 1045, 602))
+                sheet.paste(region.resize((525, 549)), (left + 10, top + 30))
+        destination = output / f"squads-{page[0]['sequence']}-{page[-1]['sequence']}.png"
+        sheet.save(destination)
+        results.append(str(destination))
+    return results
+
+
 def make_sheets(connection, root, output, mode="matches", start=0, end=99999):
     root, output = Path(root), Path(output)
     output.mkdir(parents=True, exist_ok=True)
     screen_types = {"match_facts"} if mode in {"matches", "teams"} else {"player_performance", "goalkeeper_performance"}
+    if mode == "squads":
+        screen_types = {"squad"}
     rows = [dict(row) for row in connection.execute(
         "SELECT sequence, path, source_images.id, screen_type, candidate_json FROM source_images "
         "JOIN source_paths ON source_paths.source_id = source_images.id JOIN extractions ON extractions.source_id = source_images.id "
         "WHERE present = 1 AND sequence BETWEEN ? AND ? ORDER BY sequence", (start, end),
     ) if row["screen_type"] in screen_types]
+    if mode == "squads":
+        return make_squad_sheets(rows, root, output)
     if mode == "teams":
         distinct = []
         seen_matches = set()
@@ -101,7 +123,7 @@ def main():
     parser = argparse.ArgumentParser(description="Render original image regions for batch visual review.")
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--output", type=Path, default=Path("data/review/sheets"))
-    parser.add_argument("--mode", choices=("matches", "players", "teams"), default="matches")
+    parser.add_argument("--mode", choices=("matches", "players", "teams", "squads"), default="matches")
     parser.add_argument("--start", type=int, default=0)
     parser.add_argument("--end", type=int, default=99999)
     arguments = parser.parse_args()

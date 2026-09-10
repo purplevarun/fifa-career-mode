@@ -13,6 +13,7 @@ from career_data.database import connect, coverage_report, insert_entity, invent
 from career_data.pipeline import approve_review, backup_database, ensure_club, ensure_edition, ensure_season, export_data, extract_pending, make_review
 from career_data.batch_review import fixture_contexts, prepare_player_cores
 from career_data.identifiers import is_uuid, new_id
+from career_data.reconciliation import reconcile_totals
 
 
 class DatabaseTestCase(unittest.TestCase):
@@ -422,6 +423,111 @@ class ImportTests(DatabaseTestCase):
         self.assertEqual(report["competitions"][0]["draws"], 0)
         self.assertIsNone(report["matches"][0]["goal_difference"])
         self.assertIn("missing_match_score", [warning["code"] for warning in report["warnings"]])
+
+
+class ReconciliationTests(DatabaseTestCase):
+    def prepare_stats(self, *, missing_goals=False, observed_on=None, snapshot_kind="season_end"):
+        self.create_image()
+        inventory(self.connection, self.root)
+        self.create_match()
+        self.player_id = self.create_player("Takefusa Kubo")
+        source_id = self.connection.execute("SELECT id FROM source_images").fetchone()[0]
+        insert_entity(self.connection, "player_matches", {
+            "match_id": self.match_id, "player_id": self.player_id, "club_id": self.home_club_id,
+            "goals": None if missing_goals else 1, "assists": 1, "rating": 8.4, "displayed_position": "CAM",
+        })
+        snapshot = {"player_id": self.player_id, "club_id": self.home_club_id, "season_id": self.season_id,
+                    "source_id": source_id, "scope": "all_competitions", "snapshot_kind": snapshot_kind,
+                    "observed_on": observed_on, "appearances": 1, "goals": 1, "assists": 1, "average_rating": 8.4}
+        self.snapshot_id = insert_entity(self.connection, "player_competition_snapshots", snapshot)
+        self.connection.commit()
+
+    def test_reconciliation_counts_each_match_once_and_excludes_other_seasons(self):
+        self.prepare_stats()
+        next_edition = ensure_edition(self.connection, {"competition": "Invitational Cup", "season": "2019/20"})
+        next_match = insert_entity(self.connection, "matches", {
+            "competition_season_id": next_edition, "played_on": "2019-07-07",
+            "home_club_id": self.home_club_id, "away_club_id": self.away_club_id,
+        })
+        insert_entity(self.connection, "player_matches", {"match_id": next_match, "player_id": self.player_id,
+                      "club_id": self.home_club_id, "goals": 5, "assists": 5, "rating": 10})
+        report = reconcile_totals(self.connection, "2018/19")
+        result = report["comparisons"][0]
+        self.assertEqual(result["result"], "match")
+        self.assertEqual(result["metrics"]["goals"]["derived"], 1)
+        self.assertEqual(result["metrics"]["appearances"]["derived"], 1)
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM player_matches").fetchone()[0], 2)
+
+    def test_unconfirmed_cutoff_is_not_compared(self):
+        self.prepare_stats(snapshot_kind="in_season")
+        report = reconcile_totals(self.connection)
+        self.assertEqual(report["summary"]["unconfirmed_cutoffs"], 1)
+        self.assertEqual(report["comparisons"][0]["metrics"], {})
+
+    def test_missing_match_goals_are_not_zero(self):
+        self.prepare_stats(missing_goals=True)
+        metric = reconcile_totals(self.connection)["comparisons"][0]["metrics"]["goals"]
+        self.assertEqual(metric["result"], "not_comparable")
+        self.assertIsNone(metric["derived"])
+        self.assertEqual(metric["missing_match_values"], 1)
+
+    def test_goal_discrepancy_does_not_rewrite_either_source(self):
+        self.prepare_stats()
+        self.connection.execute("UPDATE player_competition_snapshots SET goals = 3")
+        metric = reconcile_totals(self.connection)["comparisons"][0]["metrics"]["goals"]
+        self.assertEqual(metric["result"], "mismatch")
+        self.assertEqual(metric["difference"], -2)
+        self.assertEqual(self.connection.execute("SELECT goals FROM player_matches").fetchone()[0], 1)
+        self.assertEqual(self.connection.execute("SELECT goals FROM player_competition_snapshots").fetchone()[0], 3)
+
+    def test_display_average_is_truncated_without_losing_raw_mean(self):
+        self.prepare_stats()
+        self.connection.execute("UPDATE player_competition_snapshots SET appearances = 2, goals = 2, assists = 2, average_rating = 8.5")
+        second_match = insert_entity(self.connection, "matches", {
+            "competition_season_id": self.edition_id, "played_on": "2018-07-08",
+            "home_club_id": self.home_club_id, "away_club_id": self.away_club_id,
+        })
+        insert_entity(self.connection, "player_matches", {"match_id": second_match, "player_id": self.player_id,
+                      "club_id": self.home_club_id, "goals": 1, "assists": 1, "rating": 8.7})
+        metric = reconcile_totals(self.connection)["comparisons"][0]["metrics"]["average_rating"]
+        self.assertEqual(metric["result"], "match")
+        self.assertEqual(metric["raw_match_average"], 8.55)
+        self.assertEqual(metric["derived"], 8.5)
+
+    def test_dated_snapshot_excludes_later_matches(self):
+        self.prepare_stats(observed_on="2018-07-04", snapshot_kind="in_season")
+        later_match = insert_entity(self.connection, "matches", {
+            "competition_season_id": self.edition_id, "played_on": "2018-07-08",
+            "home_club_id": self.home_club_id, "away_club_id": self.away_club_id,
+        })
+        insert_entity(self.connection, "player_matches", {"match_id": later_match, "player_id": self.player_id,
+                      "club_id": self.home_club_id, "goals": 5, "assists": 2, "rating": 10})
+        comparison = reconcile_totals(self.connection)["comparisons"][0]
+        self.assertEqual(comparison["result"], "match")
+        self.assertEqual(comparison["metrics"]["appearances"]["derived"], 1)
+
+    def test_competition_scope_excludes_preseason_but_season_total_includes_it(self):
+        self.prepare_stats()
+        league_edition = ensure_edition(self.connection, {"competition": "EFL League Two", "season": "2018/19"})
+        league_match = insert_entity(self.connection, "matches", {
+            "competition_season_id": league_edition, "played_on": "2018-08-04",
+            "home_club_id": self.home_club_id, "away_club_id": self.away_club_id,
+        })
+        insert_entity(self.connection, "player_matches", {"match_id": league_match, "player_id": self.player_id,
+                      "club_id": self.home_club_id, "goals": 3, "assists": 0, "rating": 7.9})
+        self.connection.execute("UPDATE player_competition_snapshots SET appearances = 2, goals = 4, assists = 1, average_rating = 8.1")
+        source_id = self.connection.execute("SELECT id FROM source_images").fetchone()[0]
+        insert_entity(self.connection, "player_competition_snapshots", {
+            "player_id": self.player_id, "club_id": self.home_club_id, "season_id": self.season_id,
+            "source_id": source_id, "scope": "competition", "competition_season_id": league_edition,
+            "snapshot_kind": "season_end", "appearances": 1, "goals": 3, "assists": 0, "average_rating": 7.9,
+        })
+        report = reconcile_totals(self.connection)
+        totals = {comparison["scope"]: comparison for comparison in report["comparisons"]}
+        self.assertEqual(totals["competition"]["result"], "match")
+        self.assertEqual(totals["all_competitions"]["result"], "match")
+        self.assertEqual(totals["competition"]["metrics"]["goals"]["derived"], 3)
+        self.assertEqual(totals["all_competitions"]["metrics"]["goals"]["derived"], 4)
 
 
 if __name__ == "__main__":

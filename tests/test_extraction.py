@@ -76,6 +76,24 @@ class ScreenshotTests(unittest.TestCase):
         self.assertEqual(first["player"], last["player"])
         self.assertIsNone(first["observed_on"])
 
+    def test_season_totals_remain_separate_from_match_stats(self):
+        with Image.open(self.root / "raw_data/Screenshot (1056).png") as image:
+            records, evidence = self.extractor.extract_squad_totals(image.convert("RGB"))
+        total = next(record for record in records if record["scope"] == "all_competitions")
+        self.assertEqual(total["type"], "player_competition_snapshot")
+        self.assertEqual(total["player"], "Erling Braut Haaland")
+        self.assertEqual((total["appearances"], total["goals"], total["assists"]), (52, 23, 13))
+        self.assertEqual(total["average_rating"], 7.7)
+        self.assertIsNone(total["season"])
+        self.assertNotIn("match_id", total)
+        self.assertIn("season_totals.5.goals", evidence)
+
+    def test_season_table_detection_survives_misread_heading(self):
+        extraction = self.extractor.extract(self.root / "raw_data/Screenshot (1071).png")
+        records = [record for record in extraction["records"] if record["type"] == "player_competition_snapshot"]
+        self.assertEqual(len(records), 6)
+        self.assertEqual(records[0]["player"], "Elliott Hewitt")
+
 
 if __name__ == "__main__":
     unittest.main()

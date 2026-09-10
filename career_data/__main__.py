@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .database import connect, coverage_report, inventory, json_text, status, validate_database
 from .pipeline import approve_review, backup_database, export_data, extract_pending, make_review, parse_sequences, write_json
+from .reconciliation import reconcile_totals
 
 
 def main(argv=None):
@@ -19,6 +20,11 @@ def main(argv=None):
     reporter = commands.add_parser("report", help="Report fixture, player and team-stat coverage with reconciliation warnings")
     reporter.add_argument("--club", default="Notts County")
     reporter.add_argument("--output", type=Path, help="Write the full report as JSON and print its summary")
+    reconciliation = commands.add_parser("reconcile", help="Compare captured cumulative player stats with reviewed match records")
+    reconciliation.add_argument("--season")
+    reconciliation.add_argument("--club", default="Notts County")
+    reconciliation.add_argument("--rating-decimals", type=int, choices=(1, 2), default=1)
+    reconciliation.add_argument("--output", type=Path)
     importer = commands.add_parser("import", help="Inventory and extract new screenshots into the review queue")
     importer.add_argument("--screenshots", help="Numeric selection, for example 73,76,808-810")
     importer.add_argument("--limit", type=int, default=20, help="Maximum images to OCR this run (default: 20)")
@@ -48,6 +54,13 @@ def main(argv=None):
             if arguments.output:
                 write_json(arguments.output, report)
                 print(json_text({"output": str(arguments.output), "summary": report["summary"], "warnings": report["warnings"]}), end="")
+            else:
+                print(json_text(report), end="")
+        elif arguments.command == "reconcile":
+            report = reconcile_totals(connection, arguments.season, arguments.club, arguments.rating_decimals)
+            if arguments.output:
+                write_json(arguments.output, report)
+                print(json_text({"output": str(arguments.output), "summary": report["summary"]}), end="")
             else:
                 print(json_text(report), end="")
         elif arguments.command == "validate":

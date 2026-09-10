@@ -149,25 +149,80 @@ def prepare_team_tables(connection, decisions):
     return {"schema_version": headers["schema_version"], "sources": sources}
 
 
+def prepare_season_end(connection, decisions):
+    from . import SCHEMA_VERSION
+
+    columns = decisions["columns"]
+    expected = {"appearances", "goals", "assists", "clean_sheets", "yellow_cards", "red_cards", "average_rating"}
+    if len(columns) != len(expected) or set(columns) != expected:
+        raise ValueError("Season-end table columns must exactly identify the seven displayed statistics")
+    competitions = decisions["competitions"]
+    if competitions[-1] is not None or len(set(competitions)) != len(competitions):
+        raise ValueError("List each competition once and the all-competitions total last")
+    players = decisions["players"]
+    if len({player["player"] for player in players}) != len(players):
+        raise ValueError("Duplicate player in season-end capture group")
+    sequences = {player["source_sequence"] for player in players}
+    if len(sequences) != len(players):
+        raise ValueError("Duplicate selected-player source in season-end capture group")
+    source_map = {source["sequence"]: source for source in select_sources(connection, sequences)}
+    sources = []
+    for player in players:
+        sequence = player["source_sequence"]
+        source = source_map[sequence]
+        if source["screen_type"] != "squad" or len(player["totals"]) != len(competitions):
+            raise ValueError(f"Invalid selected-player season table at screenshot {sequence}")
+        if any(len(row) != len(columns) for row in player["totals"]):
+            raise ValueError(f"Incorrect table width at screenshot {sequence}")
+        totals = [dict(zip(columns, row)) for row in player["totals"]]
+        for field in columns:
+            if field == "average_rating":
+                continue
+            if sum(row[field] for row in totals[:-1]) != totals[-1][field]:
+                raise ValueError(f"Screenshot {sequence}: {field} competition rows do not sum to the observed total")
+        common = {"player": player["player"], "club": decisions["club"], "season": decisions["season"],
+                  "snapshot_kind": "season_end", "date_basis": decisions["date_basis"], "observed_on": None}
+        profile = {**common, "type": "player_snapshot", "date_precision": "season",
+                   **{field: player[field] for field in ("overall", "age", "displayed_position", "nationality")}}
+        existing = connection.execute(
+            "SELECT date_basis FROM player_snapshots JOIN players ON players.id = player_id "
+            "WHERE source_id = ? AND players.name = ? AND snapshot_kind = 'season_end'", (source["id"], player["player"]),
+        ).fetchone()
+        if existing:
+            profile["date_basis"] = existing["date_basis"]
+        records = [profile]
+        for competition, row in zip(competitions, totals):
+            record = {**common, "type": "player_competition_snapshot", **row,
+                      "scope": "competition" if competition else "all_competitions"}
+            if competition:
+                record["competition"] = competition
+            records.append(record)
+        sources.append({"source_id": source["id"], "path": source["path"], "screen_type": "squad",
+                        "complete": False, "records": records,
+                        "issues": ["Selected player profile and totals reviewed; other roster rows remain separate work."]})
+    return {"schema_version": SCHEMA_VERSION, "sources": sources}
+
+
 def main():
     parser = argparse.ArgumentParser(description="Prepare image-reviewed archive batches without approving unreviewed fields.")
     parser.add_argument("--decisions", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--approve", action="store_true")
-    parser.add_argument("--kind", choices=("matches", "players", "teams"), default="matches")
+    parser.add_argument("--replace-reviewed", action="store_true")
+    parser.add_argument("--kind", choices=("matches", "players", "teams", "season"), default="matches")
     arguments = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     connection = connect(root / "data/career.sqlite")
     try:
         decisions = json.loads(arguments.decisions.read_text(encoding="utf-8"))
-        prepare = {"matches": prepare_match_headers, "players": prepare_player_cores, "teams": prepare_team_tables}[arguments.kind]
+        prepare = {"matches": prepare_match_headers, "players": prepare_player_cores, "teams": prepare_team_tables, "season": prepare_season_end}[arguments.kind]
         document = prepare(connection, decisions)
         write_json(arguments.output, document, overwrite=False)
         print(json_text({"review_sources": len(document["sources"]), "output": str(arguments.output)}), end="")
         if arguments.approve:
-            note_key = {"matches": "match_header_review", "players": "player_core_review", "teams": "team_table_review"}[arguments.kind]
+            note_key = {"matches": "match_header_review", "players": "player_core_review", "teams": "team_table_review", "season": "review_note"}[arguments.kind]
             note = decisions[note_key]
-            print(json_text(approve_review(connection, document, note)), end="")
+            print(json_text(approve_review(connection, document, note, arguments.replace_reviewed)), end="")
             print(json_text(export_data(connection, root / "data/exports/career.json")), end="")
     finally:
         connection.close()

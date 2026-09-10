@@ -174,6 +174,7 @@ class ScreenshotExtractor:
         evidence = {"full_image_tokens": tokens, "extractor_version": EXTRACTOR_VERSION,
                     "dimensions": [image.width, image.height], "fields": {}}
         issues = ["Visual review is required before these candidates become canonical data."]
+        additional_records = []
         if abs(image.width / image.height - BASE_WIDTH / BASE_HEIGHT) > 0.015:
             return {"screen_type": screen_type, "records": [], "evidence": evidence,
                     "issues": ["Unsupported aspect ratio; inspect the screenshot and establish its layout."]}
@@ -186,13 +187,18 @@ class ScreenshotExtractor:
             record, fields = self.extract_snapshot(image)
             issues.append("Only the selected player's profile is proposed; other squad and totals rows need review.")
             issues.append("Establish season and date precision from surrounding career evidence.")
+            squad_text = compact(" ".join(token["text"] for token in tokens)).replace("0", "o")
+            if "totals" in squad_text and any(alias in squad_text for alias in COMPETITION_LABELS):
+                additional_records, totals_fields = self.extract_squad_totals(image, record)
+                fields.update(totals_fields)
+                issues.append("Cumulative totals are observations, not extra match stats; confirm their season and cutoff.")
         else:
             return {"screen_type": screen_type, "records": [], "evidence": evidence,
                     "issues": [f"{screen_type}: no automatic field layout yet; retain this source for manual review."]}
         evidence["fields"] = fields
         issues.extend(f"Low OCR confidence for {field}: {reading['confidence']:.2f}"
                       for field, reading in fields.items() if reading["confidence"] < 0.85)
-        return {"screen_type": screen_type, "records": [record], "evidence": evidence, "issues": issues}
+        return {"screen_type": screen_type, "records": [record, *additional_records], "evidence": evidence, "issues": issues}
 
     def extract_match(self, image):
         regions = {
@@ -281,3 +287,40 @@ class ScreenshotExtractor:
             "date_from": None, "date_to": None, "date_precision": "unknown",
             "date_basis": "No exact in-game date on this screen; season context requires review.",
         }, fields
+
+    def extract_squad_totals(self, image, profile=None):
+        if profile is None:
+            profile, profile_fields = self.extract_snapshot(image)
+        regions = {}
+        numeric_columns = {
+            "appearances": (819, 843), "goals": (851, 875), "assists": (883, 907),
+            "clean_sheets": (915, 939), "yellow_cards": (947, 971), "red_cards": (979, 1003),
+            "average_rating": (1009, 1040),
+        }
+        for row_index, center in enumerate((410, 445, 479, 513, 547, 582)):
+            prefix = f"season_totals.{row_index}"
+            regions[f"{prefix}.competition"] = (701, center - 10, 809, center + 10)
+            for field, (left, right) in numeric_columns.items():
+                regions[f"{prefix}.{field}"] = (left, center - 10, right, center + 10)
+        evidence = self.recognize(image, regions)
+        records = []
+        for row_index in range(6):
+            prefix = f"season_totals.{row_index}"
+            label = compact(evidence[f"{prefix}.competition"]["raw_text"]).replace("0", "o")
+            if not label:
+                continue
+            total = label in {"total", "totals"}
+            competition = next((name for alias, name in COMPETITION_LABELS.items() if alias in label), None)
+            record = {
+                "type": "player_competition_snapshot", "player": profile["player"], "club": profile["club"],
+                "season": None, "observed_on": None, "snapshot_kind": "in_season",
+                "date_basis": "Season and observation cutoff must be confirmed from career context.",
+                "scope": "all_competitions" if total else "competition",
+            }
+            if not total:
+                record["competition"] = competition
+            for field in numeric_columns:
+                raw_text = evidence[f"{prefix}.{field}"]["raw_text"]
+                record[field] = (parse_number if field == "average_rating" else parse_integer)(raw_text)
+            records.append(record)
+        return records, evidence
