@@ -9,7 +9,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 from . import EXTRACTOR_VERSION, SCHEMA_VERSION
-from .database import EXPORT_TABLES, image_hash, json_text, status, validate_database
+from .database import EXPORT_TABLES, coverage_report, image_hash, json_text, status, validate_database
 
 
 BOOLEAN_FIELDS = {"is_preseason", "extra_time", "started"}
@@ -384,7 +384,7 @@ def import_record(connection, source_id, record, replace_reviewed=False):
 
 
 def approve_review(connection, document, note, replace_reviewed=False):
-    if not isinstance(document, dict) or document.get("schema_version") != SCHEMA_VERSION or not isinstance(document.get("sources"), list):
+    if not isinstance(document, dict) or document.get("schema_version") not in (1, SCHEMA_VERSION) or not isinstance(document.get("sources"), list):
         raise ValueError("Unsupported or invalid review document")
     if not isinstance(note, str) or not note.strip():
         raise ValueError("A review note is required")
@@ -454,7 +454,7 @@ def export_data(connection, output_path):
     if errors:
         raise ValueError("Cannot export an invalid database: " + "; ".join(errors))
     data = {"schema_version": SCHEMA_VERSION, "generated_at": datetime.now(timezone.utc).isoformat(),
-            "coverage": status(connection)}
+            "coverage": status(connection), "match_coverage": coverage_report(connection)}
     for table in EXPORT_TABLES:
         ordering = "1, 2" if table.endswith("_sources") else "id"
         rows = [dict(row) for row in connection.execute(f"SELECT * FROM {table} ORDER BY {ordering}")]

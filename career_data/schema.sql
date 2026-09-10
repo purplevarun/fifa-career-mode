@@ -156,6 +156,8 @@ CREATE TABLE player_matches (
     fouled INTEGER CHECK (fouled >= 0),
     successful_dribbles INTEGER CHECK (successful_dribbles >= 0),
     goals_conceded INTEGER CHECK (goals_conceded >= 0),
+    goals_conceded_displayed INTEGER CHECK (goals_conceded_displayed >= 0),
+    goals_conceded_basis TEXT,
     shots_caught INTEGER CHECK (shots_caught >= 0),
     shots_parried INTEGER CHECK (shots_parried >= 0),
     crosses_caught INTEGER CHECK (crosses_caught >= 0),

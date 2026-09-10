@@ -21,9 +21,9 @@ Scope initially covers this one career save. If another save is added, introduce
 
 ## 2. Current Evidence and Its Limits
 
-The initial analysis scanned the legacy text outputs and spot-checked two original player-performance screenshots. The following historical counts were recorded before the text was removed. Current screenshot extraction and import progress is in section 7; the complete archive has not been imported.
+All 1,296 original screenshots have now been inventoried, classified, and extracted directly from images. Every captured fixture has verified headers, scores, competition membership, both teams' match facts, and the core player-performance fields. Detailed player passing/defending fields beyond the pilot, complete squad-boundary captures, and some career events remain unreviewed; this is complete match coverage, not a claim that every visible field in the archive is imported.
 
-| Screen category inferred from text | Files |
+| Screenshot category | Files |
 | --- | ---: |
 | Player performance | 1,162 |
 | Match summary / match facts | 95 |
@@ -36,17 +36,16 @@ The initial analysis scanned the legacy text outputs and spot-checked two origin
 
 - There were 1,296 source images and 1,296 text files. The new image inventory has independently verified 1,296 readable images with 1,296 distinct content hashes.
 - Legacy text totaled approximately 636 KB. There were no identical trimmed text outputs, but different OCR outputs can describe the same screen or match.
-- Date and competition normalization produced 85 provisional fixture groups from 95 match summaries, spanning 2018-07-04 through 2019-11-02.
-- Ten fixture groups have repeated summary captures. Do not import each summary as a new match.
-- Provisional numeric screenshot groups contain 11-17 player-performance captures per match. These are not verified unique appearances.
-- Text classification found 88 goalkeeper-performance screens and one opponent-performance screen: Sam Hoskins of Northampton in `Screenshot_976.txt`. Do not assume every player screen is a Notts County player.
-- These discovery counts are not verified canonical totals. Current imported records are a reviewed pilot subset; identity resolution across the whole archive remains unfinished.
+- Visual review resolved 95 match summaries into 85 canonical fixtures, spanning 2018-07-04 through 2019-11-02. All 95 summary sources are linked; ten are repeated captures, not additional matches.
+- The 1,162 player-performance captures resolve to 1,132 unique player-match records after merging 30 repeated captures. All 85 fixtures have 11-17 Notts County player records. This count does not establish who started or how many minutes each player played.
+- There are 88 goalkeeper-performance captures and one opponent capture: [Sam Hoskins of Northampton](raw_data/Screenshot%20%28976%29.png). The opponent record is separate from the 1,131 Notts County appearances, and its unshown OVR remains null.
+- Canonical identity resolution covers the performance archive: 24 players, including 23 Notts County players and the opponent. The squad-only images can still reveal additional identities.
 
-### Provisional competition inventory
+### Verified competition inventory
 
-These counts are discovery targets to reconcile against images, not totals to force the import to match.
+These counts have been reconciled against the original match-header images and imported into SQLite.
 
-| Competition | Provisional matches | is_preseason |
+| Competition | Verified matches | is_preseason |
 | --- | ---: | --- |
 | European International Cup | 5 | true |
 | Invitational Cup | 5 | true |
@@ -56,7 +55,7 @@ These counts are discovery targets to reconcile against images, not totals to fo
 | Checkatrade Trophy | 7 | false |
 | FA Cup | 4 | false |
 
-The July 2018 European International Cup belongs to season 2018/19; the July 2019 Invitational Cup belongs to 2019/20. Confirm fixture details from their screenshots. Preserve displayed labels such as `European Int'l Cup` and `The Emirates FA Cup` as aliases.
+The July 2018 European International Cup belongs to season 2018/19; the July 2019 Invitational Cup belongs to 2019/20. All ten preseason fixtures are imported. Preserve displayed labels such as `European Int'l Cup` and `The Emirates FA Cup` as aliases.
 
 If images reveal a standalone preseason friendly, assign it to an explicit preseason-friendly competition edition once that classification is established. An unresolved competition stays in staging for review; it must not become a match with a missing competition or an invented league assignment.
 
@@ -77,7 +76,7 @@ If images reveal a standalone preseason friendly, assign it to an explicit prese
 
 Names below describe logical entities; implementation naming can follow consistent SQLite conventions. Use stable IDs independent of filenames, spelling corrections, ratings, and scores.
 
-The implemented schema is [career_data/schema.sql](career_data/schema.sql), version 1. Tables use plural snake_case names. The importer refuses unsupported schema versions and existing unversioned databases instead of overwriting them.
+The implemented schema is [career_data/schema.sql](career_data/schema.sql), version 2. Tables use plural snake_case names. Opening a version-1 database performs a transactional, data-preserving migration that adds the displayed goalkeeper count and its normalization basis. Version-1 review documents remain accepted. Unsupported database versions and existing unversioned databases are rejected instead of overwritten.
 
 | Entity | Main responsibility and fields |
 | --- | --- |
@@ -116,6 +115,7 @@ The implemented schema is [career_data/schema.sql](career_data/schema.sql), vers
 - Capture observed rating, OVR, goals, assists, shots on/off target, completed/failed short/medium/long passes, key passes, and crosses successful/failed.
 - Capture tackles won/lost, fouls, penalties conceded, interceptions, blocks, out-of-position counts, possession won/lost, clearances, headers won/lost, and movement/dribbling fields when visible.
 - Use the goalkeeper layout for goals conceded, shots caught/parried, crosses caught, and balls stripped, along with its shared passing/positioning fields.
+- The game can include opponent shootout goals in the displayed goalkeeper `Goals Conceded` number. Preserve that number in `goals_conceded_displayed`; use `goals_conceded` for the count before the shootout, with the justification in `goals_conceded_basis`. The batch review normalizes only when the displayed total reconciles with the verified match and penalty scores. Ambiguous totals raise a review error.
 - Keep unknown values as `null`. Preserve the difference between unreadable, not captured, and not applicable in field metadata. Only write zero when the source supports zero.
 - Store counts as numbers and retain source-displayed percentages. Derive aggregate passing/shooting percentages from summed numerators and denominators, not an average of percentages; return null for zero denominators.
 - Retain a source link for every recovered field, especially values corrected by visual review.
@@ -235,7 +235,7 @@ Also inspect the squad snapshot candidates above and at least one permanent-tran
 - Appearance coverage: report verified player count, missing/ambiguous identities, and duplicate captures per fixture. Do not treat a count of 11 screenshots as proof of a complete starting XI.
 - Snapshot integrity: preserve date certainty, source evidence, season, and snapshot kind. Missing start/end evidence must not produce a fabricated OVR change.
 - Season reconciliation: compare derived appearances, goals, assists, clean sheets, and other available metrics with captured cumulative stats at the same cutoff and scope. Track differences rather than overwriting source facts.
-- Standings reconciliation: the May 2019 dashboard appears to show Notts County with 46 played and 83 points. Verify the image before using this as a League Two cross-check.
+- Standings reconciliation: the verified May 2019 dashboard shows Notts County with 46 played and 83 points. The independently reconstructed League Two results match both totals.
 - Import repeatability: rerun the pilot import and verify unchanged row counts and IDs; test that reviewed corrections survive re-extraction.
 - Export integrity: validate JSON structure, foreign references, null handling, preseason inclusion, snapshot history, and aggregate consistency with SQLite.
 - Publication honesty: label partial coverage and do not advertise full-league histories, minutes-based metrics, or timeline events that the images do not support.
@@ -249,18 +249,22 @@ career_data/
   database.py                initialization, inventory, integrity checks
   extraction.py              screenshot classification and crop recognition
   pipeline.py                staging, review, canonical imports, export, backup
+  batch_review.py            explicitly scoped image-reviewed archive batches
+  review_images.py           original-image contact sheets for visual checks
   schema.sql                 relational schema, constraints, source links
 tests/                       focused importer and real-image OCR tests
 requirements.txt             pinned direct image/OCR dependencies
 DATA_PROCESS.md              living workflow and handoff
 data/
   career.sqlite              canonical data, source inventory, OCR, reviews
+  archive-review.json        retained decisions and corrections for this archive
   review/                    editable scratch review documents
   exports/career.json         derived read-only dataset for React
+  exports/coverage.json       reproducible per-match coverage report
   backups/                   consistent local SQLite backup copies
 ```
 
-SQLite is not a disposable generated file: it contains human-reviewed corrections and progress that automatic OCR alone cannot reproduce. It is eligible for version control. Scratch review files, exports, SQLite journal files, and local backups are ignored by Git. No implementation changes have been committed or pushed yet. Preserve both the database and original screenshots when moving or backing up the project; a local backup alone does not protect against loss of the machine.
+SQLite is not a disposable generated file: it contains human-reviewed corrections and progress that automatic OCR alone cannot reproduce. The initial importer and pilot database were committed as `39856c5`; the full-match checkpoint includes the updated database, retained archive decisions, and this document. No push was requested for the implementation commits. Scratch review files, exports, SQLite journal files, and local backups remain ignored by Git. Preserve both the database and original screenshots when moving or backing up the project; a local backup alone does not protect against loss of the machine.
 
 ### Runtime and setup
 
@@ -285,7 +289,7 @@ python3 -m career_data import --limit 20
 python3 -m career_data status
 ```
 
-The initial archive still has many pending images, so this command resumes that backlog first. To target newly added screenshots, use an explicit selection:
+All current images already have extraction results, so this command skips them and processes newly added images. It does not automatically approve pending detailed fields in old images. To target an explicit selection:
 
 ```sh
 python3 -m career_data import --screenshots 1159 --limit 1
@@ -309,7 +313,7 @@ Player-performance records need a confirmed `match_id`, or a `match_source_id` t
 python3 -m career_data review --screenshots 74-87 --match 1 --output data/review/opening-check.json
 ```
 
-This sets review context only. Verify the association visually before approval. The importer never guesses a player's match solely from the preceding filename.
+This sets review context only. Verify the association visually before approval. For the existing archive, the batch helper uses the visually checked header sequence and rejects a player group interrupted by a non-match screen or missing a linked header. It is not a substitute for checking fixture boundaries in new captures.
 
 For unimplemented layouts, the generated `records` list is empty and the source remains queued. Manual transcription into supported record types is possible: `match`, `player_match`, `player_snapshot`, `player_competition_snapshot`, `player_transfer`, and `competition_event`. An empty record list cannot be approved. See the existing pilot review in SQLite for examples; standings do not yet have a canonical table or importer.
 
@@ -327,6 +331,7 @@ Do not run approval merely because OCR completed. In this first version, every n
 ```sh
 python3 -m career_data inventory
 python3 -m career_data export
+python3 -m career_data report --output data/exports/coverage.json
 python3 -m career_data import --screenshots 108 --limit 1 --reextract
 python3 -m career_data backup data/backups/manual-checkpoint.sqlite
 python3 -m unittest discover -s tests -v
@@ -334,14 +339,32 @@ CAREER_OCR_TESTS=1 python3 -m unittest discover -s tests -v
 ```
 
 - `inventory` performs no OCR. Source IDs are SHA-256 content hashes; different filenames for identical bytes share one source.
-- `export` regenerates `data/exports/career.json`, including stable IDs, relationships, real boolean preseason flags, source references, and coverage counts. React can fetch this JSON without opening SQLite in the browser.
+- `export` regenerates `data/exports/career.json`, including stable IDs, relationships, real boolean preseason flags, source references, coverage counts, and the `match_coverage` report. React can fetch this JSON without opening SQLite in the browser.
+- `report` provides source-link coverage, per-fixture core-player and team-stat completeness, competition result summaries, selected detailed-field availability, and reconciliation warnings. It is read-only. Unknown scores do not become draws, and null fields do not become zeroes. Use `--club` to change the club scope; the default is Notts County.
 - `--reextract` refreshes machine candidates but never canonical records or reviewed corrections. Unsupported layouts and extraction errors remain visible for follow-up.
-- `backup` uses SQLite's backup API and refuses an existing destination. Use a new name for each checkpoint. The current verified copy is `data/backups/2026-09-10-pilot.sqlite`.
-- The default test command skips four real-image OCR tests. Setting `CAREER_OCR_TESTS=1` runs all 29 tests against the included original images as well as temporary-database tests.
+- `backup` uses SQLite's backup API and refuses an existing destination. Use a new name for each checkpoint. The current full-match copy is `data/backups/2026-09-10-all-matches.sqlite`; earlier pilot and pre-batch copies are also retained locally.
+- The default test command skips four real-image OCR tests. Setting `CAREER_OCR_TESTS=1` runs all 36 tests against the included original images as well as temporary-database tests.
 - Global `--root` and `--db` options go before the subcommand, for example `python3 -m career_data --db data/career.sqlite status`.
 - Source paths and crop coordinates are repository-relative and normalized. The extractor currently supports the observed 1366x768 layout and proportionally scaled 16:9 images; different aspect ratios are queued instead of using incorrect crop coordinates. Same-aspect layouts with different UI placement still require visual review.
 - RapidOCR 1.2.3 exposes `text_recognizer(crops)`, not the newer `text_rec` interface. Its `use_det=False` call keyword does not disable detection. The implementation calls the pinned recognizer directly for numeric cells; keep this in mind before upgrading OCR.
 - `rg` was unavailable in this terminal; use available workspace search tools. No system packages or editor extensions were installed.
+
+### Replaying the reviewed archive
+
+[data/archive-review.json](data/archive-review.json) records the 95 reviewed header sequences, all player-core ranges, canonical name spellings, observed goalkeeper assist corrections, and the 85 reviewed team tables with explicit OCR overrides. It is retained outside the ignored scratch directory. The complete reviewed payloads and source evidence also remain in SQLite.
+
+```sh
+python3 -m career_data.review_images --mode matches --output data/review/match-sheets
+python3 -m career_data.review_images --mode players --output data/review/player-sheets
+python3 -m career_data.review_images --mode teams --output data/review/team-sheets
+python3 -m career_data.batch_review --kind matches --decisions data/archive-review.json --output data/review/replay-headers.json --approve
+python3 -m career_data.batch_review --kind players --decisions data/archive-review.json --output data/review/replay-players.json --approve
+python3 -m career_data.batch_review --kind teams --decisions data/archive-review.json --output data/review/replay-teams.json --approve
+```
+
+Use fresh output names if a file already exists. The three batch commands were replayed against the completed database and skipped all 95, 1,162, and 85 reviews respectively, with unchanged canonical record counts. They replay existing approvals; do not extend the decision file to new screenshots without visual checks. `--kind players` approves only the specified core fields and preserves already fully reviewed pilot records. It does not bulk-approve detailed OCR candidates.
+
+For subsequent detailed-stat work, add only newly verified fields to the current reviewed records. The `review` command starts from the latest reviewed payload, which intentionally omits unreviewed detail. Retrieve raw candidates and crop evidence from `extractions` as needed; never replace reviewed corrections with fresh OCR guesses.
 
 ## 7. Progress and Resume Checkpoint
 
@@ -353,48 +376,48 @@ CAREER_OCR_TESTS=1 python3 -m unittest discover -s tests -v
 - [x] Implement and test extraction/review/import/export/backup commands.
 - [x] Verify the opening preseason fixture and all 14 associated player-performance screens.
 - [x] Verify the other pilot match headers, including shootout separation and the first League One fixture.
-- [ ] Complete the player-performance groups for the remaining pilot fixtures.
+- [x] Complete core-player coverage for the remaining pilot fixtures and every other captured match.
 - [x] Verify example opening/end-of-season player snapshots, season totals, and transfer/loan facts; retain incomplete source coverage.
 - [x] Pass focused unit and real-screenshot validation for the implemented layouts and importer.
-- [ ] Establish canonical identities, fixture boundaries, and season anchors.
-- [ ] Extract and review all remaining screenshot families in batches.
-- [ ] Reconcile match data against season snapshots and standings evidence.
+- [x] Establish canonical identities and verified fixture/season links for all performance captures.
+- [x] Extract and classify all 1,296 screenshots without unknown layouts or extraction errors.
+- [x] Import all 85 fixtures, 170 complete team-stat rows, and 1,132 unique core player performances.
+- [x] Reconcile League Two results with final standings and Ramsdale's captured season totals; retain the one goal-credit discrepancy.
+- [ ] Review remaining detailed player statistics beyond the original pilot.
+- [ ] Complete full-roster start/end-of-season snapshots and cumulative totals for the other players.
+- [ ] Complete the remaining transfer, news, standings, and competition-result records.
 - [x] Create and validate the SQLite import, including rerun/correction behavior and a backup.
-- [x] Produce the first verified, explicitly partial JSON export and coverage counts.
+- [x] Export full match/core coverage with explicit field-level limitations and a repeatable coverage report.
 - [ ] Build the React visualization application on the validated dataset.
 
-### Latest checkpoint: 2026-09-10, first working importer
+### Latest checkpoint: 2026-09-10, all captured matches recorded
 
-- Database: `data/career.sqlite`, schema version 1; approximately 1.4 MB at this checkpoint. Backup: `data/backups/2026-09-10-pilot.sqlite`. React export: `data/exports/career.json`.
-- Inventory: 1,296 readable, distinct source images; no original screenshots modified or removed.
-- Extracted/classified: 25 images. Source states: 19 `imported`, 6 `needs_review`, 1,271 `inventoried` and awaiting extraction.
-- Canonical records: 16 players, 5 clubs, 2 seasons, 7 competitions, 6 competition editions, 4 matches, 8 team-match rows, 15 player-match rows, 17 player snapshots, 6 player-competition snapshots, 2 transfers, and 2 competition events.
-- Complete Notts County player group: match 1 has 14 unique player-performance records. Their 1 goal, 1 assist, 5 shots on target, 1 shot off target, and goalkeeper's 1 goal conceded reconcile with the corresponding summary. Starting status and minutes remain unknown.
-- Snapshot history includes Ramsdale's 2018/19 opening OVR 62 and closing OVR 65, with season-level date precision, plus 15 match-time OVR observations across the imported appearances. Captured season totals are stored separately, not added to appearance aggregates.
-- Reviewed sources: 70, 73-87, 101, 108, 808, 1053, 1055, 1124, 1159, and 1231. Source 1054 was visually checked for May 2019 context and final standings but has no canonical record yet.
-- Partial sources still queued: 70 and 1055 (other squad rows), 1053 (other news), 1124 and 1231 (dates, financial details, and profile/other offer rows), and 1054 (dashboard/standings).
-- Transfer examples are Matty James, permanent, and Dominic Calvert-Lewin, loan. Unknown selling/lending clubs, year-qualified transfer dates, currency codes, and fees were not invented. Contract and loan durations are separate; displayed wages remain in source evidence pending financial normalization.
-- Competition events: Notts County's 2018/19 League Two title and Ramsdale's goalkeeper award, both announced 2019-05-04. Other news headlines do not establish award recipients and were not guessed.
-- Scratch review documents: `data/review/pilot.json` and `data/review/opening-match.json`. Approved payloads and review notes are stored in SQLite, so these files are not required to preserve approved data. They may be regenerated with `review` using a new filename.
-- Validation completed: all 29 tests passed with `CAREER_OCR_TESTS=1`; SQLite integrity and foreign-key checks passed; reapproving the 14-player review skipped all 14 sources without duplicates; forced OCR refresh of source 108 preserved its reviewed zero assists and clearances; original-image Git diff was empty.
-- Removed at user request: the legacy Python OCR script and 1,296 generated text files. The implementation, database, and current document changes have not been committed or pushed.
-
-| Match ID | Date | Fixture and score | Competition edition | Imported player rows |
-| --- | --- | --- | --- | ---: |
-| 1 | 2018-07-04 | Notts County 1-1 Dundee FC | European International Cup 2018/19, preseason | 14 |
-| 2 | 2018-07-08 | Livorno 0-1 Notts County | European International Cup 2018/19, preseason | 1 |
-| 3 | 2019-02-14 | Notts County 0-0 Shrewsbury; 4-3 on penalties | Checkatrade Trophy 2018/19 | 0 |
-| 4 | 2019-08-03 | Notts County 1-1 Wycombe | EFL League One 2019/20 | 0 |
+- Database: `data/career.sqlite`, schema version 2; approximately 41 MB. Full-match backup: `data/backups/2026-09-10-all-matches.sqlite`. React export: `data/exports/career.json`. Coverage report: `data/exports/coverage.json`.
+- Inventory: all 1,296 original images are readable, content-hashed, classified, and extracted. No screenshot was modified or removed; no unclassified or extraction-error sources remain.
+- Canonical records: 24 players, 51 clubs, 2 seasons, 7 competitions, 9 competition editions, 85 matches, 170 team-match rows, 1,132 player-match rows, 1,133 player snapshots, 6 player-competition snapshots, 2 transfers, and 2 competition events.
+- Match coverage: all 95 match-summary captures link to the 85 fixtures. All 10 preseason games are included, five in each tournament. Every fixture has two complete team-stat rows covering shots, shots on target, possession, tackles, fouls, corners, shot accuracy, and pass accuracy.
+- Player coverage: every one of the 1,162 performance captures is linked. Thirty repeated captures merge into existing appearances. The 1,132 unique records comprise 1,131 Notts County appearances and one Northampton appearance, with 11-17 Notts County records per fixture.
+- Visually reviewed core fields: identity, club, displayed position, OVR where shown, rating, goals, assists, and shots on/off target; goalkeeper cores use goals conceded and shots caught/parried. These fields are complete for Notts County. Sam Hoskins' unshown OVR remains null.
+- Player detail is not complete across the archive: passing by distance, defensive/movement fields, and other non-core metrics retain only the 15 fully reviewed pilot performances. The remaining machine candidates and image coordinates stay in SQLite for review. Starting status and minutes remain unknown; do not publish per-90 statistics.
+- Snapshot history: 1,131 match-time OVR observations plus Ramsdale's two 2018/19 boundary snapshots, OVR 62 at the opening and 65 at the close. These match observations do not replace the unfinished full-squad boundary groups at sources 70-72 and the closing squad screens.
+- Source states: 100 `imported` and 1,196 `needs_review`. These states refer to the entire source, not fixture/core coverage. Pending sources include detailed player fields, ten duplicate summaries whose canonical matches already have team stats, and the 39 non-match sources. No fixture or performance screenshot is missing its canonical link.
+- Shootout handling: retain `goals_conceded_displayed` and normalized `goals_conceded` separately. For example, Ramsdale's Swansea screen displays 5, comprising 1 match goal plus 4 penalty-shootout goals. The correction basis is stored; no extra-time duration is inferred from a shootout alone.
+- Reconciliation: all 46 League Two results produce 83 points, matching the final-standings screenshot. Ramsdale's derived 2018/19 totals are 53 appearances and 18 clean sheets, matching the captured squad totals. Captured cumulative stats remain separate from match aggregates.
+- One retained warning: match 80, Portsmouth 0-3 Notts County on 2019-10-09, has only 2 goals credited to Notts players. The verified match score and individual credits are preserved. An own goal or other attribution is not established; no player has been assigned an invented goal. The warning is included in both `report` and the React export.
+- Existing transfer/event examples remain unchanged: Matty James' permanent arrival, Dominic Calvert-Lewin's loan, Notts County's League Two title, and Ramsdale's goalkeeper award. Other transfers, career events, and financial/date details still need separate review.
+- Review decisions: `data/archive-review.json` is retained for version control. Approved payloads, correction history, hashes, and OCR evidence live in SQLite. Scratch contact sheets and review documents remain under the ignored `data/review/` directory.
+- Verification: all 36 tests passed with `CAREER_OCR_TESTS=1`; database integrity and foreign-key checks passed; all team possessions total 100; every match has complete core player fields; full replay skipped 95 header, 1,162 player, and 85 team approvals without changing counts; schema migration preserves existing records; original-image Git diff was empty.
+- Commit checkpoint: initial importer `39856c5`; full-match data, review tooling, coverage reporting, and this handoff are included in the next checkpoint commit. No implementation push was requested.
 
 ### Exact next work
 
-1. Read `status` and the existing database; do not reinitialize or delete it. The opening fixture is already reviewed and must not be recreated.
-2. Complete the player screens around sources 808 and 1159 for matches 3 and 4, confirming their boundaries from images. The documented three-fixture pilot is not complete until those groups are reviewed. Match 2 also has only its goalkeeper so far.
-3. Inspect the next-season Invitational Cup images and import that preseason edition; its competition is already registered with `is_preseason = true`, but no Invitational match has been imported yet.
-4. Complete opening/closing squad snapshots for the other players, resolving aliases against the 16 existing identities. Keep uncertainty about exact observation dates explicit.
-5. Improve the remaining cell-level OCR misses, particularly zero clearances and some goalkeeper assists, using image-based tests. Do not loosen validation or turn arbitrary missing values into zero.
-6. Add and verify transfer/news/standings layouts as needed. Current automated extraction covers match facts, outfield performance, goalkeeper performance, and the selected squad profile only; other screens retain full OCR evidence for manual review.
-7. Continue extraction in bounded batches and reconcile the full match history with captured competition totals and final standings. The archive is not yet ready to present as a complete career dataset.
+1. Run `status` and `report` against the saved database; do not reinitialize it. All current matches, team tables, and player cores are already imported. Running `import` with no new images will skip existing extractions, not fill unreviewed detail.
+2. Implement full roster-table extraction for the user-confirmed opening group 70-72 and closing squad groups, merging overlapping rows within each group and keeping separate historical observations across seasons. Resolve names against the existing 24 identities, not fresh fuzzy matches.
+3. Review remaining player passing, defending, movement, and goalkeeper-detail regions in bounded batches. Add only verified fields to existing appearances; preserve all core corrections and the distinct shootout counts.
+4. Review the Portsmouth goal-credit discrepancy only if additional screenshot evidence can establish it. Otherwise retain the warning and both observed totals.
+5. Complete remaining transfer, squad-total, standings, news, and competition-result records. Maintain exact versus uncertain dates, loan versus contract terms, and fee versus wage distinctions.
+6. Reconcile each player's derived totals against the remaining captured competition snapshots at matching cutoffs and scope. Never alter image-derived values merely to make totals agree.
+7. The match/core dataset is usable for initial React match pages and player summaries with coverage indicators. Full detailed-stat and squad-history views must expose their current gaps until the above work is complete.
 
 ### How to resume and update this document
 
@@ -414,3 +437,6 @@ CAREER_OCR_TESTS=1 python3 -m unittest discover -s tests -v
 - 2026-09-10: Remove the legacy OCR script and generated text at the user's request, while preserving every original screenshot.
 - 2026-09-10: Require visual approval in this first importer version. Numeric crop extraction is useful but not sufficiently reliable for unattended canonical imports.
 - 2026-09-10: Keep the database eligible for version control and provide explicit SQLite backups; ignore only scratch reviews, derived exports, journals, and local backup copies.
+- 2026-09-10: Complete all 85 fixture headers, 170 team-stat rows, and core fields for all 1,162 player captures. Keep non-core OCR values unapproved; scope each review to what was actually inspected.
+- 2026-09-10: Add schema version 2 to separate shootout-inclusive displayed goalkeeper counts from pre-shootout goals conceded, preserving both the original evidence and the correction basis.
+- 2026-09-10: Retain archive review decisions outside the ignored scratch directory and export a repeatable coverage report, including the unresolved Portsmouth goal-credit discrepancy.

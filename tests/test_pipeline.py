@@ -8,8 +8,9 @@ from pathlib import Path
 
 from PIL import Image
 
-from career_data.database import connect, inventory, status, validate_database
+from career_data.database import connect, coverage_report, inventory, status, validate_database
 from career_data.pipeline import approve_review, backup_database, export_data, extract_pending, make_review
+from career_data.batch_review import fixture_contexts, prepare_player_cores
 
 
 class DatabaseTestCase(unittest.TestCase):
@@ -38,6 +39,27 @@ class DatabaseTestCase(unittest.TestCase):
 
 
 class DatabaseTests(DatabaseTestCase):
+    def test_version_one_migration_preserves_existing_records(self):
+        match_id = self.create_match()
+        self.connection.execute("INSERT INTO players(name) VALUES ('Aaron Ramsdale')")
+        self.connection.execute("INSERT INTO player_matches(match_id, player_id, club_id, goals_conceded) VALUES (?, 1, 1, 2)", (match_id,))
+        self.connection.execute("ALTER TABLE player_matches DROP COLUMN goals_conceded_displayed")
+        self.connection.execute("ALTER TABLE player_matches DROP COLUMN goals_conceded_basis")
+        self.connection.execute("PRAGMA user_version = 1")
+        self.connection.commit()
+        self.connection.close()
+        self.connection = connect(self.root / "career.sqlite")
+        self.addCleanup(self.connection.close)
+        self.assertEqual(self.connection.execute("PRAGMA user_version").fetchone()[0], 2)
+        self.assertEqual(tuple(self.connection.execute("SELECT goals_conceded, goals_conceded_displayed FROM player_matches").fetchone()), (2, 2))
+        self.assertEqual(validate_database(self.connection), [])
+
+    def test_empty_coverage_has_no_invented_matches(self):
+        report = coverage_report(self.connection)
+        self.assertEqual(report["summary"]["matches"], 0)
+        self.assertEqual(report["summary"]["minimum_player_records_per_match"], 0)
+        self.assertEqual(report["warnings"], [])
+
     def test_inventory_is_content_based_and_repeatable(self):
         original = self.create_image()
         shutil.copyfile(original, self.raw / "Screenshot (74).png")
@@ -294,6 +316,89 @@ class ImportTests(DatabaseTestCase):
         self.assertIsNone(self.connection.execute("SELECT competition_season_id FROM player_competition_snapshots").fetchone()[0])
         self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM player_competition_snapshots").fetchone()[0], 1)
         self.assertEqual(self.connection.execute("SELECT contract_months, loan_months, fee_minor FROM player_transfers").fetchone()[:], (12, 24, None))
+
+    def test_core_batch_never_imports_unreviewed_detailed_fields(self):
+        match_source, document = self.approved_match()
+        self.connection.execute("UPDATE source_images SET screen_type = 'match_facts' WHERE id = ?", (match_source,))
+        self.connection.commit()
+        player_source = self.prepare_source(76, "black")
+
+        class FakePlayerExtractor:
+            def extract(self, path):
+                return {"screen_type": "player_performance", "evidence": {}, "issues": [], "records": [{
+                    "type": "player_match", "player": "Takefusa Kubo", "club": "Notts County",
+                    "overall": 63, "rating": 8.4, "goals": 0, "assists": 1,
+                    "passes_completed_short": 999, "clearances": 999,
+                }]}
+
+        extract_pending(self.connection, self.root, {76}, extractor=FakePlayerExtractor())
+        decisions = {"player_core_ranges": [[76, 76]]}
+        review = prepare_player_cores(self.connection, decisions)
+        record = review["sources"][0]["records"][0]
+        self.assertNotIn("clearances", record)
+        self.assertNotIn("passes_completed_short", record)
+        self.assertFalse(review["sources"][0]["complete"])
+        approve_review(self.connection, review, "Only image-reviewed core fields")
+        self.assertIsNone(self.connection.execute("SELECT clearances FROM player_matches").fetchone()[0])
+        self.assertEqual(self.connection.execute("SELECT assists FROM player_matches").fetchone()[0], 1)
+
+    def test_fixture_context_rejects_interrupted_player_groups(self):
+        source_id, document = self.approved_match()
+        self.connection.execute("UPDATE source_images SET screen_type = 'match_facts' WHERE id = ?", (source_id,))
+        self.connection.commit()
+        interruption = self.prepare_source(74, "gray")
+        player_source = self.prepare_source(75, "black")
+        self.connection.execute("UPDATE source_images SET screen_type = 'squad' WHERE id = ?", (interruption,))
+        self.connection.execute("UPDATE source_images SET screen_type = 'player_performance' WHERE id = ?", (player_source,))
+        self.connection.commit()
+        with self.assertRaisesRegex(ValueError, "boundary"):
+            fixture_contexts(self.connection)
+
+    def test_goalkeeper_shootout_counts_remain_separate(self):
+        source_id, document = self.approved_match()
+        self.connection.execute("UPDATE matches SET home_penalties = 2, away_penalties = 4")
+        self.connection.execute("UPDATE source_images SET screen_type = 'match_facts' WHERE id = ?", (source_id,))
+        self.connection.commit()
+        self.prepare_source(76, "black")
+
+        class FakeKeeperExtractor:
+            def extract(self, path):
+                return {"screen_type": "goalkeeper_performance", "evidence": {}, "issues": [], "records": [{
+                    "type": "player_match", "player": "Aaron Ramsdale", "club": "Notts County",
+                    "rating": 6.8, "overall": 63, "goals_conceded": 5, "assists": None,
+                }]}
+
+        extract_pending(self.connection, self.root, {76}, extractor=FakeKeeperExtractor())
+        review = prepare_player_cores(self.connection, {"player_core_ranges": [[76, 76]], "goalkeeper_zero_assists": [76]})
+        approve_review(self.connection, review, "Verified match score and goalkeeper count")
+        result = self.connection.execute("SELECT goals_conceded, goals_conceded_displayed FROM player_matches").fetchone()
+        self.assertEqual(tuple(result), (1, 5))
+
+    def test_coverage_reports_differences_without_modifying_records(self):
+        self.approved_match()
+        self.connection.execute("INSERT INTO players(name) VALUES ('Takefusa Kubo')")
+        self.connection.execute("INSERT INTO player_matches(match_id, player_id, club_id, displayed_position, goals, assists, rating, overall, shots_on_target, shots_off_target) VALUES (1, 1, 1, 'CAM', 0, 1, 8.4, 63, 1, 0)")
+        self.connection.commit()
+        report = coverage_report(self.connection)
+        self.assertEqual(report["summary"]["matches"], 1)
+        self.assertEqual(report["summary"]["preseason_matches"], 1)
+        self.assertEqual(report["summary"]["player_records"], 1)
+        self.assertEqual(report["summary"]["matches_with_two_complete_team_rows"], 0)
+        self.assertEqual(report["player_field_availability"]["minutes_played"], {"recorded": 0, "null": 1})
+        discrepancy = next(warning for warning in report["warnings"] if warning["code"] == "player_goal_difference")
+        self.assertEqual(discrepancy["difference"], 1)
+        self.assertEqual(self.connection.execute("SELECT home_goals FROM matches").fetchone()[0], 1)
+        self.assertEqual(self.connection.execute("SELECT goals FROM player_matches").fetchone()[0], 0)
+
+    def test_coverage_does_not_treat_unknown_scores_as_draws(self):
+        source_id, document = self.approved_match()
+        self.connection.execute("UPDATE matches SET home_goals = NULL, away_goals = NULL")
+        self.connection.commit()
+        report = coverage_report(self.connection)
+        self.assertEqual(report["competitions"][0]["known_results"], 0)
+        self.assertEqual(report["competitions"][0]["draws"], 0)
+        self.assertIsNone(report["matches"][0]["goal_difference"])
+        self.assertIn("missing_match_score", [warning["code"] for warning in report["warnings"]])
 
 
 if __name__ == "__main__":

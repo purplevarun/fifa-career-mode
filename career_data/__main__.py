@@ -4,7 +4,7 @@ import sqlite3
 import sys
 from pathlib import Path
 
-from .database import connect, inventory, json_text, status, validate_database
+from .database import connect, coverage_report, inventory, json_text, status, validate_database
 from .pipeline import approve_review, backup_database, export_data, extract_pending, make_review, parse_sequences, write_json
 
 
@@ -16,6 +16,9 @@ def main(argv=None):
     commands.add_parser("inventory", help="Inventory images without running OCR")
     commands.add_parser("status", help="Show canonical record counts and outstanding source states")
     commands.add_parser("validate", help="Check database integrity and relationships")
+    reporter = commands.add_parser("report", help="Report fixture, player and team-stat coverage with reconciliation warnings")
+    reporter.add_argument("--club", default="Notts County")
+    reporter.add_argument("--output", type=Path, help="Write the full report as JSON and print its summary")
     importer = commands.add_parser("import", help="Inventory and extract new screenshots into the review queue")
     importer.add_argument("--screenshots", help="Numeric selection, for example 73,76,808-810")
     importer.add_argument("--limit", type=int, default=20, help="Maximum images to OCR this run (default: 20)")
@@ -40,6 +43,13 @@ def main(argv=None):
             print(json_text(inventory(connection, root)), end="")
         elif arguments.command == "status":
             print(json_text(status(connection)), end="")
+        elif arguments.command == "report":
+            report = coverage_report(connection, arguments.club)
+            if arguments.output:
+                write_json(arguments.output, report)
+                print(json_text({"output": str(arguments.output), "summary": report["summary"], "warnings": report["warnings"]}), end="")
+            else:
+                print(json_text(report), end="")
         elif arguments.command == "validate":
             errors = validate_database(connection)
             print(json_text({"valid": not errors, "errors": errors}), end="")
