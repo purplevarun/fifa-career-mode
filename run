@@ -1,0 +1,55 @@
+#!/bin/sh
+set -eu
+
+ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+WEB_DIR="$ROOT_DIR/web"
+
+usage() {
+  cat <<'EOF'
+Usage: ./run <command> [args...]
+
+Commands:
+  format       Format web source and project documentation with Prettier
+  dev          Start the Vite development server
+  build        Build the production dashboard
+  preview      Preview the production build
+  test         Run frontend data tests
+  e2e          Run Playwright browser tests
+  lint         Run Oxlint
+  check        Run format check, lint, tests, and build
+  sync-data    Refresh the JSON export and screenshot previews
+EOF
+}
+
+command_name=${1:-}
+shift || true
+
+case "$command_name" in
+  format)
+    exec npm --prefix "$WEB_DIR" exec -- prettier --write \
+      "$WEB_DIR/package.json" "$WEB_DIR/*.json" "$WEB_DIR/*.ts" \
+      "$WEB_DIR/src" "$WEB_DIR/scripts" "$WEB_DIR/tests" "$ROOT_DIR/DATA_PROCESS.md"
+    ;;
+  dev|build|preview|test|e2e|lint)
+    exec npm --prefix "$WEB_DIR" run "$command_name" -- "$@"
+    ;;
+  check)
+    npm --prefix "$WEB_DIR" exec -- prettier --check \
+      "$WEB_DIR/package.json" "$WEB_DIR/*.json" "$WEB_DIR/*.ts" \
+      "$WEB_DIR/src" "$WEB_DIR/scripts" "$WEB_DIR/tests" "$ROOT_DIR/DATA_PROCESS.md"
+    npm --prefix "$WEB_DIR" run lint
+    npm --prefix "$WEB_DIR" test
+    exec npm --prefix "$WEB_DIR" run build
+    ;;
+  sync-data)
+    exec npm --prefix "$WEB_DIR" run sync-data -- "$@"
+    ;;
+  ''|-h|--help|help)
+    usage
+    ;;
+  *)
+    printf 'Unknown command: %s\n\n' "$command_name" >&2
+    usage >&2
+    exit 2
+    ;;
+esac

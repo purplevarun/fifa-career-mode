@@ -25,16 +25,16 @@ Scope initially covers this one career save. If another save is added, introduce
 
 All 1,296 original screenshots have now been inventoried, classified, and extracted directly from images. Every captured fixture has verified headers, scores, competition membership, both teams' match facts, and the core player-performance fields. The 20 first-season closing player profiles and their 120 cumulative competition/total rows are also verified and imported. Detailed player passing/defending fields beyond the pilot, complete opening squad captures, and some career events remain unreviewed; this is not a claim that every visible field in the archive is imported.
 
-| Screenshot category | Files |
-| --- | ---: |
-| Player performance | 1,162 |
-| Match summary / match facts | 95 |
-| Squad hub: player details or season totals | 25 |
-| Transfer detail | 3 |
-| Career dashboard / partial standings | 5 |
-| News | 5 |
-| Competition result | 1 |
-| Total | 1,296 |
+| Screenshot category                        | Files |
+| ------------------------------------------ | ----: |
+| Player performance                         | 1,162 |
+| Match summary / match facts                |    95 |
+| Squad hub: player details or season totals |    25 |
+| Transfer detail                            |     3 |
+| Career dashboard / partial standings       |     5 |
+| News                                       |     5 |
+| Competition result                         |     1 |
+| Total                                      | 1,296 |
 
 - There were 1,296 source images and 1,296 text files. The new image inventory has independently verified 1,296 readable images with 1,296 distinct content hashes.
 - Legacy text totaled approximately 636 KB. There were no identical trimmed text outputs, but different OCR outputs can describe the same screen or match.
@@ -47,15 +47,15 @@ All 1,296 original screenshots have now been inventoried, classified, and extrac
 
 These counts have been reconciled against the original match-header images and imported into SQLite.
 
-| Competition | Verified matches | is_preseason |
-| --- | ---: | --- |
-| European International Cup | 5 | true |
-| Invitational Cup | 5 | true |
-| EFL League Two | 46 | false |
-| EFL League One | 16 | false |
-| Carabao Cup | 2 | false |
-| Checkatrade Trophy | 7 | false |
-| FA Cup | 4 | false |
+| Competition                | Verified matches | is_preseason |
+| -------------------------- | ---------------: | ------------ |
+| European International Cup |                5 | true         |
+| Invitational Cup           |                5 | true         |
+| EFL League Two             |               46 | false        |
+| EFL League One             |               16 | false        |
+| Carabao Cup                |                2 | false        |
+| Checkatrade Trophy         |                7 | false        |
+| FA Cup                     |                4 | false        |
 
 The July 2018 European International Cup belongs to season 2018/19; the July 2019 Invitational Cup belongs to 2019/20. All ten preseason fixtures are imported. Preserve displayed labels such as `European Int'l Cup` and `The Emirates FA Cup` as aliases.
 
@@ -90,21 +90,21 @@ The implemented schema is [career_data/schema.sql](career_data/schema.sql), vers
 - Club aliases map alternative spellings to one club UUID. For example, a reviewed `NottsCounty` spelling can resolve to the same club as `Notts County`, avoiding duplicate club records and split statistics. An alias is not a second club. Currently most saved club aliases are the normalized canonical name; the lookup supports explicit additional spellings as they are reviewed.
 - Player aliases serve the same identity-resolution purpose. Do not automatically merge ambiguous names, and do not create aliases from unsupported guesses.
 
-| Entity | Main responsibility and fields |
-| --- | --- |
-| `Player` | Stable identity, canonical full name, nationality when supported. Keep OCR/display aliases linked to the same ID. Do not use the name as a primary key. |
-| `Club` | Notts County, opponents, and transfer counterparties, with canonical names and aliases. |
-| `Season` | Label such as `2018/19`, with boundaries supported by career context. |
-| `Competition` | Canonical name, format/type, aliases, and `is_preseason`. |
-| `Competition_Season` | An edition of a competition in a season; unique `(competition_id, season_id)` for this save. |
-| `Match` | Competition edition, date, home/away clubs, venue, stage/round/leg where known, scores, completion and review status. |
-| `Player_Match` | Match, player, club at the time, observed position and OVR, participation information, rating, and individual statistics. |
-| `Team_Match` | Match and club, with team-level shots, possession, corners, fouls, tackles, accuracy, and other visible match facts. |
-| `Player_Snapshot` | Player, season, club, observation date or interval, snapshot kind, OVR, age, positions, squad role, and other visible historical details. |
+| Entity                        | Main responsibility and fields                                                                                                                                                                                                                                      |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Player`                      | Stable identity, canonical full name, nationality when supported. Keep OCR/display aliases linked to the same ID. Do not use the name as a primary key.                                                                                                             |
+| `Club`                        | Notts County, opponents, and transfer counterparties, with canonical names and aliases.                                                                                                                                                                             |
+| `Season`                      | Label such as `2018/19`, with boundaries supported by career context.                                                                                                                                                                                               |
+| `Competition`                 | Canonical name, format/type, aliases, and `is_preseason`.                                                                                                                                                                                                           |
+| `Competition_Season`          | An edition of a competition in a season; unique `(competition_id, season_id)` for this save.                                                                                                                                                                        |
+| `Match`                       | Competition edition, date, home/away clubs, venue, stage/round/leg where known, scores, completion and review status.                                                                                                                                               |
+| `Player_Match`                | Match, player, club at the time, observed position and OVR, participation information, rating, and individual statistics.                                                                                                                                           |
+| `Team_Match`                  | Match and club, with team-level shots, possession, corners, fouls, tackles, accuracy, and other visible match facts.                                                                                                                                                |
+| `Player_Snapshot`             | Player, season, club, observation date or interval, snapshot kind, OVR, age, positions, squad role, and other visible historical details.                                                                                                                           |
 | `Player_Competition_Snapshot` | Captured cumulative appearances, goals, assists, clean sheets, cards, and average rating for a player, club, competition edition, and observation cutoff. `snapshot_kind` and `date_basis` distinguish confirmed season-end totals from undated in-season captures. |
-| `Player_Transfer` | Player, source/destination clubs where known, permanent/loan type, status, effective date or interval, fee, wage, currency, contract term, and separate loan term. |
-| `Competition_Event` | Competition edition, event type, relevant player/club, event or announcement date, and period/stage when applicable. |
-| `Source_Image` | Original relative path, content hash, dimensions, numeric filename sequence, screen type, and processing/review status. |
+| `Player_Transfer`             | Player, source/destination clubs where known, permanent/loan type, status, effective date or interval, fee, wage, currency, contract term, and separate loan term.                                                                                                  |
+| `Competition_Event`           | Competition edition, event type, relevant player/club, event or announcement date, and period/stage when applicable.                                                                                                                                                |
+| `Source_Image`                | Original relative path, content hash, dimensions, numeric filename sequence, screen type, and processing/review status.                                                                                                                                             |
 
 `Match_Competition` is unnecessary: `Match.competition_season_id` provides the required many-to-one relationship. A match's round or stage belongs to its edition, not to a second competition. An aggregate called "All competitions" is a query, not a competition record.
 
@@ -201,11 +201,11 @@ Discriminating check: manually transcribe a small set of source images, includin
 
 Start with three fixture anchors and their actual neighboring player captures:
 
-| Pilot | Source image | What it tests |
-| --- | --- | --- |
-| Opening preseason fixture | [Screenshot (73)](raw_data/Screenshot%20%2873%29.png) | Mandatory preseason edition, missing text score, normal player layouts. |
-| First League One fixture | [Screenshot (1159)](raw_data/Screenshot%20%281159%29.png) | Next-season context, repeated summary handling, changed squad. |
-| Checkatrade shootout fixture | [Screenshot (808)](raw_data/Screenshot%20%28808%29.png) | Shootout versus match score and competition-specific duration uncertainty. |
+| Pilot                        | Source image                                              | What it tests                                                              |
+| ---------------------------- | --------------------------------------------------------- | -------------------------------------------------------------------------- |
+| Opening preseason fixture    | [Screenshot (73)](raw_data/Screenshot%20%2873%29.png)     | Mandatory preseason edition, missing text score, normal player layouts.    |
+| First League One fixture     | [Screenshot (1159)](raw_data/Screenshot%20%281159%29.png) | Next-season context, repeated summary handling, changed squad.             |
+| Checkatrade shootout fixture | [Screenshot (808)](raw_data/Screenshot%20%28808%29.png)   | Shootout versus match score and competition-specific duration uncertainty. |
 
 Also inspect the squad snapshot candidates above and at least one permanent-transfer and one loan detail screen.
 
