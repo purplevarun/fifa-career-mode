@@ -1,5 +1,6 @@
 CREATE TABLE source_images (
-    id TEXT PRIMARY KEY CHECK (length(id) = 64),
+    id TEXT PRIMARY KEY NOT NULL CHECK (length(id) = 36),
+    sha256 TEXT NOT NULL UNIQUE CHECK (length(sha256) = 64),
     byte_size INTEGER NOT NULL CHECK (byte_size >= 0),
     width INTEGER CHECK (width > 0),
     height INTEGER CHECK (height > 0),
@@ -28,57 +29,60 @@ CREATE TABLE extractions (
 );
 
 CREATE TABLE reviews (
-    id INTEGER PRIMARY KEY,
+    id TEXT PRIMARY KEY NOT NULL CHECK (length(id) = 36),
     source_id TEXT NOT NULL REFERENCES source_images(id),
+    revision INTEGER NOT NULL CHECK (revision > 0),
     payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
     payload_hash TEXT NOT NULL,
+    legacy_payload_hash TEXT,
     note TEXT NOT NULL CHECK (length(trim(note)) > 0),
     reviewed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE (source_id, payload_hash)
+    UNIQUE (source_id, payload_hash),
+    UNIQUE (source_id, revision)
 );
 
 CREATE TABLE players (
-    id INTEGER PRIMARY KEY,
+    id TEXT PRIMARY KEY NOT NULL CHECK (length(id) = 36),
     name TEXT NOT NULL CHECK (length(trim(name)) > 0),
     nationality TEXT
 );
 CREATE TABLE player_aliases (
     alias TEXT PRIMARY KEY,
-    player_id INTEGER NOT NULL REFERENCES players(id)
+    player_id TEXT NOT NULL REFERENCES players(id)
 );
 
 CREATE TABLE clubs (
-    id INTEGER PRIMARY KEY,
+    id TEXT PRIMARY KEY NOT NULL CHECK (length(id) = 36),
     name TEXT NOT NULL UNIQUE CHECK (length(trim(name)) > 0)
 );
 CREATE TABLE club_aliases (
     alias TEXT PRIMARY KEY,
-    club_id INTEGER NOT NULL REFERENCES clubs(id)
+    club_id TEXT NOT NULL REFERENCES clubs(id)
 );
 
 CREATE TABLE seasons (
-    id INTEGER PRIMARY KEY,
+    id TEXT PRIMARY KEY NOT NULL CHECK (length(id) = 36),
     label TEXT NOT NULL UNIQUE
 );
 CREATE TABLE competitions (
-    id INTEGER PRIMARY KEY,
+    id TEXT PRIMARY KEY NOT NULL CHECK (length(id) = 36),
     name TEXT NOT NULL UNIQUE,
     kind TEXT NOT NULL CHECK (kind IN ('league', 'cup', 'friendly')),
     is_preseason INTEGER NOT NULL CHECK (is_preseason IN (0, 1))
 );
 CREATE TABLE competition_seasons (
-    id INTEGER PRIMARY KEY,
-    competition_id INTEGER NOT NULL REFERENCES competitions(id),
-    season_id INTEGER NOT NULL REFERENCES seasons(id),
+    id TEXT PRIMARY KEY NOT NULL CHECK (length(id) = 36),
+    competition_id TEXT NOT NULL REFERENCES competitions(id),
+    season_id TEXT NOT NULL REFERENCES seasons(id),
     UNIQUE (competition_id, season_id)
 );
 
 CREATE TABLE matches (
-    id INTEGER PRIMARY KEY,
-    competition_season_id INTEGER NOT NULL REFERENCES competition_seasons(id),
+    id TEXT PRIMARY KEY NOT NULL CHECK (length(id) = 36),
+    competition_season_id TEXT NOT NULL REFERENCES competition_seasons(id),
     played_on TEXT NOT NULL,
-    home_club_id INTEGER NOT NULL REFERENCES clubs(id),
-    away_club_id INTEGER NOT NULL REFERENCES clubs(id),
+    home_club_id TEXT NOT NULL REFERENCES clubs(id),
+    away_club_id TEXT NOT NULL REFERENCES clubs(id),
     venue TEXT,
     round TEXT,
     home_goals INTEGER CHECK (home_goals >= 0),
@@ -95,15 +99,15 @@ CREATE TABLE matches (
     UNIQUE (competition_season_id, played_on, home_club_id, away_club_id)
 );
 CREATE TABLE match_sources (
-    match_id INTEGER NOT NULL REFERENCES matches(id),
+    match_id TEXT NOT NULL REFERENCES matches(id),
     source_id TEXT NOT NULL REFERENCES source_images(id),
     PRIMARY KEY (match_id, source_id)
 );
 
 CREATE TABLE team_matches (
-    id INTEGER PRIMARY KEY,
-    match_id INTEGER NOT NULL REFERENCES matches(id),
-    club_id INTEGER NOT NULL REFERENCES clubs(id),
+    id TEXT PRIMARY KEY NOT NULL CHECK (length(id) = 36),
+    match_id TEXT NOT NULL REFERENCES matches(id),
+    club_id TEXT NOT NULL REFERENCES clubs(id),
     shots INTEGER CHECK (shots >= 0),
     shots_on_target INTEGER CHECK (shots_on_target >= 0),
     possession_pct REAL CHECK (possession_pct BETWEEN 0 AND 100),
@@ -117,10 +121,10 @@ CREATE TABLE team_matches (
 );
 
 CREATE TABLE player_matches (
-    id INTEGER PRIMARY KEY,
-    match_id INTEGER NOT NULL REFERENCES matches(id),
-    player_id INTEGER NOT NULL REFERENCES players(id),
-    club_id INTEGER NOT NULL REFERENCES clubs(id),
+    id TEXT PRIMARY KEY NOT NULL CHECK (length(id) = 36),
+    match_id TEXT NOT NULL REFERENCES matches(id),
+    player_id TEXT NOT NULL REFERENCES players(id),
+    club_id TEXT NOT NULL REFERENCES clubs(id),
     displayed_position TEXT,
     played_position TEXT,
     overall INTEGER CHECK (overall BETWEEN 1 AND 99),
@@ -168,18 +172,18 @@ CREATE TABLE player_matches (
     UNIQUE (match_id, player_id)
 );
 CREATE TABLE player_match_sources (
-    player_match_id INTEGER NOT NULL REFERENCES player_matches(id),
+    player_match_id TEXT NOT NULL REFERENCES player_matches(id),
     source_id TEXT NOT NULL REFERENCES source_images(id),
     PRIMARY KEY (player_match_id, source_id)
 );
 
 CREATE TABLE player_snapshots (
-    id INTEGER PRIMARY KEY,
-    player_id INTEGER NOT NULL REFERENCES players(id),
-    season_id INTEGER NOT NULL REFERENCES seasons(id),
-    club_id INTEGER REFERENCES clubs(id),
+    id TEXT PRIMARY KEY NOT NULL CHECK (length(id) = 36),
+    player_id TEXT NOT NULL REFERENCES players(id),
+    season_id TEXT NOT NULL REFERENCES seasons(id),
+    club_id TEXT REFERENCES clubs(id),
     source_id TEXT NOT NULL REFERENCES source_images(id),
-    match_id INTEGER REFERENCES matches(id),
+    match_id TEXT REFERENCES matches(id),
     snapshot_kind TEXT NOT NULL CHECK (snapshot_kind IN
         ('season_start', 'season_end', 'in_season', 'first_observed', 'arrival')),
     observed_on TEXT,
@@ -199,13 +203,15 @@ CREATE TABLE player_snapshots (
 );
 
 CREATE TABLE player_competition_snapshots (
-    id INTEGER PRIMARY KEY,
-    player_id INTEGER NOT NULL REFERENCES players(id),
-    club_id INTEGER NOT NULL REFERENCES clubs(id),
-    season_id INTEGER NOT NULL REFERENCES seasons(id),
-    competition_season_id INTEGER REFERENCES competition_seasons(id),
+    id TEXT PRIMARY KEY NOT NULL CHECK (length(id) = 36),
+    player_id TEXT NOT NULL REFERENCES players(id),
+    club_id TEXT NOT NULL REFERENCES clubs(id),
+    season_id TEXT NOT NULL REFERENCES seasons(id),
+    competition_season_id TEXT REFERENCES competition_seasons(id),
     source_id TEXT NOT NULL REFERENCES source_images(id),
     observed_on TEXT,
+    snapshot_kind TEXT NOT NULL DEFAULT 'in_season' CHECK (snapshot_kind IN ('in_season', 'season_end')),
+    date_basis TEXT NOT NULL DEFAULT 'Observation cutoff not yet confirmed',
     scope TEXT NOT NULL CHECK (scope IN ('competition', 'all_competitions')),
     appearances INTEGER CHECK (appearances >= 0),
     goals INTEGER CHECK (goals >= 0),
@@ -218,10 +224,10 @@ CREATE TABLE player_competition_snapshots (
 );
 
 CREATE TABLE player_transfers (
-    id INTEGER PRIMARY KEY,
-    player_id INTEGER NOT NULL REFERENCES players(id),
-    from_club_id INTEGER REFERENCES clubs(id),
-    to_club_id INTEGER REFERENCES clubs(id),
+    id TEXT PRIMARY KEY NOT NULL CHECK (length(id) = 36),
+    player_id TEXT NOT NULL REFERENCES players(id),
+    from_club_id TEXT REFERENCES clubs(id),
+    to_club_id TEXT REFERENCES clubs(id),
     source_id TEXT NOT NULL REFERENCES source_images(id),
     transfer_type TEXT NOT NULL CHECK (transfer_type IN ('permanent', 'loan', 'loan_return')),
     effective_on TEXT,
@@ -237,15 +243,23 @@ CREATE TABLE player_transfers (
 );
 
 CREATE TABLE competition_events (
-    id INTEGER PRIMARY KEY,
-    competition_season_id INTEGER NOT NULL REFERENCES competition_seasons(id),
+    id TEXT PRIMARY KEY NOT NULL CHECK (length(id) = 36),
+    competition_season_id TEXT NOT NULL REFERENCES competition_seasons(id),
     source_id TEXT NOT NULL REFERENCES source_images(id),
     event_type TEXT NOT NULL,
-    player_id INTEGER REFERENCES players(id),
-    club_id INTEGER REFERENCES clubs(id),
+    player_id TEXT REFERENCES players(id),
+    club_id TEXT REFERENCES clubs(id),
     announced_on TEXT,
     period TEXT,
     description TEXT NOT NULL
+);
+
+CREATE TABLE legacy_ids (
+    entity_table TEXT NOT NULL,
+    old_value TEXT NOT NULL,
+    uuid TEXT NOT NULL CHECK (length(uuid) = 36),
+    PRIMARY KEY (entity_table, old_value),
+    UNIQUE (entity_table, uuid)
 );
 
 CREATE TRIGGER player_match_club_insert BEFORE INSERT ON player_matches

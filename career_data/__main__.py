@@ -25,7 +25,7 @@ def main(argv=None):
     importer.add_argument("--reextract", action="store_true", help="Refresh OCR candidates without changing reviewed records")
     reviewer = commands.add_parser("review", help="Write an editable review document; never overwrites an existing file")
     reviewer.add_argument("--screenshots", required=True)
-    reviewer.add_argument("--match", type=int, help="Propose an approved match ID for the selected performance records")
+    reviewer.add_argument("--match", help="Propose an approved match UUID for the selected performance records")
     reviewer.add_argument("--output", type=Path, required=True)
     approver = commands.add_parser("approve", help="Validate and transactionally import a visually checked review document")
     approver.add_argument("review_file", type=Path)

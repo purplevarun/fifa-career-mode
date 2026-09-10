@@ -9,7 +9,8 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 from . import EXTRACTOR_VERSION, SCHEMA_VERSION
-from .database import EXPORT_TABLES, coverage_report, image_hash, json_text, status, validate_database
+from .database import EXPORT_TABLES, coverage_report, image_hash, insert_entity, json_text, status, validate_database
+from .identifiers import is_uuid, normalize_references
 
 
 BOOLEAN_FIELDS = {"is_preseason", "extra_time", "started"}
@@ -85,7 +86,7 @@ def extract_pending(connection, root, sequences=None, limit=20, reextract=False,
             progress(f"Extracting {source['path']}")
         try:
             path = Path(root) / source["path"]
-            if image_hash(path) != source["id"]:
+            if image_hash(path) != source["sha256"]:
                 raise ValueError("Image changed after inventory; run inventory again")
             result = extractor.extract(path)
             with connection:
@@ -117,7 +118,7 @@ def extract_pending(connection, root, sequences=None, limit=20, reextract=False,
 
 
 def make_review(connection, sequences=None, match_id=None):
-    if match_id is not None and not connection.execute("SELECT 1 FROM matches WHERE id = ?", (match_id,)).fetchone():
+    if match_id is not None and (not is_uuid(match_id) or not connection.execute("SELECT 1 FROM matches WHERE id = ?", (match_id,)).fetchone()):
         raise ValueError(f"Unknown match ID: {match_id}")
     sources = []
     for source in select_sources(connection, sequences):
@@ -125,7 +126,7 @@ def make_review(connection, sequences=None, match_id=None):
         if not extraction:
             continue
         latest = connection.execute(
-            "SELECT payload_json FROM reviews WHERE source_id = ? ORDER BY id DESC LIMIT 1", (source["id"],),
+            "SELECT payload_json FROM reviews WHERE source_id = ? ORDER BY revision DESC LIMIT 1", (source["id"],),
         ).fetchone()
         previous = json.loads(latest["payload_json"]) if latest else None
         records = previous["records"] if previous else json.loads(extraction["candidate_json"])
@@ -155,7 +156,7 @@ def ensure_club(connection, name):
     if existing:
         return existing["club_id"]
     existing = connection.execute("SELECT id FROM clubs WHERE name = ? COLLATE NOCASE", (name,)).fetchone()
-    club_id = existing["id"] if existing else connection.execute("INSERT INTO clubs(name) VALUES (?)", (name,)).lastrowid
+    club_id = existing["id"] if existing else insert_entity(connection, "clubs", {"name": name})
     connection.execute("INSERT INTO club_aliases(alias, club_id) VALUES (?, ?)", (alias, club_id))
     return club_id
 
@@ -166,7 +167,7 @@ def ensure_player(connection, record):
     existing = connection.execute("SELECT player_id FROM player_aliases WHERE alias = ?", (alias,)).fetchone()
     explicit_id = record.get("player_id")
     if explicit_id is not None:
-        if type(explicit_id) is not int or not connection.execute("SELECT 1 FROM players WHERE id = ?", (explicit_id,)).fetchone():
+        if not is_uuid(explicit_id) or not connection.execute("SELECT 1 FROM players WHERE id = ?", (explicit_id,)).fetchone():
             raise ValueError(f"Unknown player ID: {explicit_id}")
         if existing and existing["player_id"] != explicit_id:
             raise ValueError(f"Player alias {name!r} already belongs to a different player")
@@ -174,7 +175,7 @@ def ensure_player(connection, record):
     elif existing:
         player_id = existing["player_id"]
     else:
-        player_id = connection.execute("INSERT INTO players(name) VALUES (?)", (name,)).lastrowid
+        player_id = insert_entity(connection, "players", {"name": name})
     connection.execute("INSERT OR IGNORE INTO player_aliases(alias, player_id) VALUES (?, ?)", (alias, player_id))
     if record.get("nationality"):
         nationality = normalized_name(record["nationality"])
@@ -190,8 +191,8 @@ def ensure_season(connection, label):
         raise ValueError("A season such as 2018/19 is required")
     if int(label[-2:]) != (int(label[:4]) + 1) % 100:
         raise ValueError(f"Season years must be consecutive: {label}")
-    connection.execute("INSERT OR IGNORE INTO seasons(label) VALUES (?)", (label,))
-    return connection.execute("SELECT id FROM seasons WHERE label = ?", (label,)).fetchone()[0]
+    existing = connection.execute("SELECT id FROM seasons WHERE label = ?", (label,)).fetchone()
+    return existing[0] if existing else insert_entity(connection, "seasons", {"label": label})
 
 
 def ensure_edition(connection, record):
@@ -201,21 +202,20 @@ def ensure_edition(connection, record):
     if competition is None:
         if type(record.get("is_preseason")) is not bool or record.get("competition_kind") not in {"league", "cup", "friendly"}:
             raise ValueError("A new competition requires competition_kind and an explicit boolean is_preseason")
-        competition_id = connection.execute(
-            "INSERT INTO competitions(name, kind, is_preseason) VALUES (?, ?, ?)",
-            (name, record["competition_kind"], record["is_preseason"]),
-        ).lastrowid
+        competition_id = insert_entity(connection, "competitions", {
+            "name": name, "kind": record["competition_kind"], "is_preseason": record["is_preseason"],
+        })
     else:
         if "is_preseason" in record and (type(record["is_preseason"]) is not bool or
                                           record["is_preseason"] != bool(competition["is_preseason"])):
             raise ValueError(f"Preseason classification conflicts with the saved competition: {name}")
         competition_id = competition["id"]
-    connection.execute(
-        "INSERT OR IGNORE INTO competition_seasons(competition_id, season_id) VALUES (?, ?)", (competition_id, season_id),
-    )
-    return connection.execute(
+    existing = connection.execute(
         "SELECT id FROM competition_seasons WHERE competition_id = ? AND season_id = ?", (competition_id, season_id),
-    ).fetchone()[0]
+    ).fetchone()
+    return existing[0] if existing else insert_entity(connection, "competition_seasons", {
+        "competition_id": competition_id, "season_id": season_id,
+    })
 
 
 def check_season_date(label, observed_on):
@@ -236,6 +236,8 @@ def checked_values(connection, table, record):
     for field, value in values.items():
         if value is None:
             continue
+        if field.endswith("_id") and not is_uuid(value):
+            raise ValueError(f"{table}.{field} must be a UUID or null")
         if columns[field] == "INTEGER":
             if field in BOOLEAN_FIELDS and type(value) is bool:
                 continue
@@ -270,9 +272,7 @@ def merge_record(connection, table, values, key, replace_reviewed=False):
             setters = ", ".join(f"{field} = ?" for field in changes)
             connection.execute(f"UPDATE {table} SET {setters} WHERE id = ?", (*changes.values(), existing["id"]))
         return existing["id"]
-    columns = ", ".join(values)
-    placeholders = ", ".join("?" for field in values)
-    return connection.execute(f"INSERT INTO {table}({columns}) VALUES ({placeholders})", tuple(values.values())).lastrowid
+    return insert_entity(connection, table, values)
 
 
 def confirmed_match(connection, record):
@@ -285,7 +285,7 @@ def confirmed_match(connection, record):
         if len(matches) != 1:
             raise ValueError("The referenced match screenshot must resolve to exactly one approved match")
         match_id = matches[0]["match_id"]
-    if type(match_id) is not int:
+    if not is_uuid(match_id):
         raise ValueError("A verified match_id or match_source_id is required for a player appearance")
     match = connection.execute(
         "SELECT matches.*, competition_seasons.season_id FROM matches "
@@ -384,10 +384,11 @@ def import_record(connection, source_id, record, replace_reviewed=False):
 
 
 def approve_review(connection, document, note, replace_reviewed=False):
-    if not isinstance(document, dict) or document.get("schema_version") not in (1, SCHEMA_VERSION) or not isinstance(document.get("sources"), list):
+    if not isinstance(document, dict) or document.get("schema_version") not in (1, 2, SCHEMA_VERSION) or not isinstance(document.get("sources"), list):
         raise ValueError("Unsupported or invalid review document")
     if not isinstance(note, str) or not note.strip():
         raise ValueError("A review note is required")
+    document = normalize_references(connection, document, allow_legacy=document["schema_version"] < 3)
     counts = {"approved_sources": 0, "skipped_reviews": 0, "reviewed_records": 0}
     seen = set()
     with connection:
@@ -412,16 +413,18 @@ def approve_review(connection, document, note, replace_reviewed=False):
             if existing and not replace_reviewed:
                 counts["skipped_reviews"] += 1
                 continue
+            previous_revision = connection.execute("SELECT COALESCE(MAX(revision), 0) FROM reviews WHERE source_id = ?", (source_id,)).fetchone()[0]
             if replace_reviewed:
-                previous_id = connection.execute("SELECT COALESCE(MAX(id), 0) FROM reviews WHERE source_id = ?", (source_id,)).fetchone()[0]
-                payload_hash = hashlib.sha256(f"{serialized}:correction_after:{previous_id}".encode()).hexdigest()
+                payload_hash = hashlib.sha256(f"{serialized}:correction_after:{previous_revision}".encode()).hexdigest()
             for record in records:
                 if not isinstance(record, dict):
                     raise ValueError("Each reviewed record must be an object")
                 import_record(connection, source_id, record, replace_reviewed)
                 counts["reviewed_records"] += 1
-            connection.execute("INSERT INTO reviews(source_id, payload_json, payload_hash, note) VALUES (?, ?, ?, ?)",
-                               (source_id, serialized, payload_hash, note.strip()))
+            insert_entity(connection, "reviews", {
+                "source_id": source_id, "payload_json": serialized, "payload_hash": payload_hash,
+                "note": note.strip(), "revision": previous_revision + 1,
+            })
             connection.execute("UPDATE source_images SET status = ?, error = NULL WHERE id = ?",
                                ("imported" if source["complete"] else "needs_review", source_id))
             counts["approved_sources"] += 1
@@ -464,7 +467,7 @@ def export_data(connection, output_path):
                     row[field] = bool(row[field])
         data[table] = rows
     data["source_images"] = [dict(row) for row in connection.execute(
-        "SELECT source_images.id, screen_type, status, "
+        "SELECT source_images.id, sha256, screen_type, status, "
         "COALESCE(MIN(CASE WHEN present = 1 THEN path END), MIN(path)) AS path, "
         "COALESCE(MAX(present), 0) AS available FROM source_images "
         "LEFT JOIN source_paths ON source_paths.source_id = source_images.id "

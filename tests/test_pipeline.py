@@ -4,13 +4,15 @@ import shutil
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 
 from PIL import Image
 
-from career_data.database import connect, coverage_report, inventory, status, validate_database
-from career_data.pipeline import approve_review, backup_database, export_data, extract_pending, make_review
+from career_data.database import connect, coverage_report, insert_entity, inventory, status, validate_database
+from career_data.pipeline import approve_review, backup_database, ensure_club, ensure_edition, ensure_season, export_data, extract_pending, make_review
 from career_data.batch_review import fixture_contexts, prepare_player_cores
+from career_data.identifiers import is_uuid, new_id
 
 
 class DatabaseTestCase(unittest.TestCase):
@@ -29,28 +31,37 @@ class DatabaseTestCase(unittest.TestCase):
         return path
 
     def create_match(self):
-        self.connection.execute("INSERT INTO seasons(label) VALUES ('2018/19')")
-        self.connection.execute("INSERT INTO competition_seasons(competition_id, season_id) VALUES (1, 1)")
-        self.connection.executemany("INSERT INTO clubs(name) VALUES (?)", [("Notts County",), ("Dundee FC",), ("Other Club",)])
-        return self.connection.execute(
-            "INSERT INTO matches(competition_season_id, played_on, home_club_id, away_club_id, home_goals, away_goals) "
-            "VALUES (1, '2018-07-04', 1, 2, 1, 1)"
-        ).lastrowid
+        self.season_id = ensure_season(self.connection, "2018/19")
+        self.edition_id = ensure_edition(self.connection, {"competition": "European International Cup", "season": "2018/19"})
+        self.home_club_id = ensure_club(self.connection, "Notts County")
+        self.away_club_id = ensure_club(self.connection, "Dundee FC")
+        self.other_club_id = ensure_club(self.connection, "Other Club")
+        self.match_id = insert_entity(self.connection, "matches", {
+            "competition_season_id": self.edition_id, "played_on": "2018-07-04",
+            "home_club_id": self.home_club_id, "away_club_id": self.away_club_id,
+            "home_goals": 1, "away_goals": 1,
+        })
+        return self.match_id
+
+    def create_player(self, name="Aaron Ramsdale"):
+        return insert_entity(self.connection, "players", {"name": name})
 
 
 class DatabaseTests(DatabaseTestCase):
-    def test_version_one_migration_preserves_existing_records(self):
+    def test_uuid_database_reopen_preserves_existing_records(self):
         match_id = self.create_match()
-        self.connection.execute("INSERT INTO players(name) VALUES ('Aaron Ramsdale')")
-        self.connection.execute("INSERT INTO player_matches(match_id, player_id, club_id, goals_conceded) VALUES (?, 1, 1, 2)", (match_id,))
-        self.connection.execute("ALTER TABLE player_matches DROP COLUMN goals_conceded_displayed")
-        self.connection.execute("ALTER TABLE player_matches DROP COLUMN goals_conceded_basis")
-        self.connection.execute("PRAGMA user_version = 1")
+        player_id = self.create_player()
+        appearance_id = insert_entity(self.connection, "player_matches", {
+            "match_id": match_id, "player_id": player_id, "club_id": self.home_club_id,
+            "goals_conceded": 2, "goals_conceded_displayed": 2,
+        })
         self.connection.commit()
         self.connection.close()
         self.connection = connect(self.root / "career.sqlite")
         self.addCleanup(self.connection.close)
-        self.assertEqual(self.connection.execute("PRAGMA user_version").fetchone()[0], 2)
+        self.assertEqual(self.connection.execute("PRAGMA user_version").fetchone()[0], 3)
+        self.assertEqual(self.connection.execute("SELECT id FROM player_matches").fetchone()[0], appearance_id)
+        self.assertTrue(is_uuid(appearance_id))
         self.assertEqual(tuple(self.connection.execute("SELECT goals_conceded, goals_conceded_displayed FROM player_matches").fetchone()), (2, 2))
         self.assertEqual(validate_database(self.connection), [])
 
@@ -94,44 +105,41 @@ class DatabaseTests(DatabaseTestCase):
             "SELECT COUNT(*) FROM competitions WHERE is_preseason = 1"
         ).fetchone()[0], 2)
         with self.assertRaises(sqlite3.IntegrityError):
-            self.connection.execute("INSERT INTO competitions(name, kind, is_preseason) VALUES ('Invalid', 'cup', 2)")
+            insert_entity(self.connection, "competitions", {"name": "Invalid", "kind": "cup", "is_preseason": 2})
 
     def test_matches_cannot_have_missing_competition(self):
         self.create_match()
-        for edition in (None, 999):
+        for edition in (None, new_id()):
             with self.assertRaises(sqlite3.IntegrityError):
-                self.connection.execute(
-                    "INSERT INTO matches(competition_season_id, played_on, home_club_id, away_club_id) "
-                    "VALUES (?, '2018-07-05', 1, 2)", (edition,),
-                )
+                insert_entity(self.connection, "matches", {
+                    "competition_season_id": edition, "played_on": "2018-07-05",
+                    "home_club_id": self.home_club_id, "away_club_id": self.away_club_id,
+                })
 
     def test_appearance_must_belong_to_participating_club(self):
         match_id = self.create_match()
-        self.connection.execute("INSERT INTO players(name) VALUES ('Takefusa Kubo')")
+        player_id = self.create_player("Takefusa Kubo")
         with self.assertRaises(sqlite3.IntegrityError):
-            self.connection.execute(
-                "INSERT INTO player_matches(match_id, player_id, club_id) VALUES (?, 1, 3)", (match_id,),
-            )
-        self.connection.execute("INSERT INTO player_matches(match_id, player_id, club_id) VALUES (?, 1, 1)", (match_id,))
+            insert_entity(self.connection, "player_matches", {"match_id": match_id, "player_id": player_id, "club_id": self.other_club_id})
+        insert_entity(self.connection, "player_matches", {"match_id": match_id, "player_id": player_id, "club_id": self.home_club_id})
         with self.assertRaises(sqlite3.IntegrityError):
-            self.connection.execute("INSERT INTO player_matches(match_id, player_id, club_id) VALUES (?, 1, 1)", (match_id,))
+            insert_entity(self.connection, "player_matches", {"match_id": match_id, "player_id": player_id, "club_id": self.home_club_id})
         self.assertEqual(validate_database(self.connection), [])
 
     def test_snapshot_requires_supported_date_precision(self):
         self.create_image()
         inventory(self.connection, self.root)
         self.create_match()
-        self.connection.execute("INSERT INTO players(name) VALUES ('Aaron Ramsdale')")
+        player_id = self.create_player()
         source_id = self.connection.execute("SELECT id FROM source_images").fetchone()[0]
+        snapshot = {"player_id": player_id, "season_id": self.season_id, "source_id": source_id,
+                    "snapshot_kind": "season_start", "date_precision": "day", "date_basis": "Date missing"}
         with self.assertRaises(sqlite3.IntegrityError):
-            self.connection.execute(
-                "INSERT INTO player_snapshots(player_id, season_id, source_id, snapshot_kind, date_precision, date_basis) "
-                "VALUES (1, 1, ?, 'season_start', 'day', 'Date missing')", (source_id,),
-            )
-        self.connection.execute(
-            "INSERT INTO player_snapshots(player_id, season_id, source_id, snapshot_kind, date_precision, date_basis, overall) "
-            "VALUES (1, 1, ?, 'first_observed', 'season', 'Opening squad screen, exact day unknown', 62)", (source_id,),
-        )
+            insert_entity(self.connection, "player_snapshots", snapshot)
+        insert_entity(self.connection, "player_snapshots", {
+            **snapshot, "snapshot_kind": "first_observed", "date_precision": "season",
+            "date_basis": "Opening squad screen, exact day unknown", "overall": 62,
+        })
         self.assertEqual(self.connection.execute("SELECT observed_on FROM player_snapshots").fetchone()[0], None)
 
 
@@ -142,7 +150,7 @@ class ImportTests(DatabaseTestCase):
         return self.connection.execute("SELECT source_id FROM source_paths WHERE sequence = ?", (sequence,)).fetchone()[0]
 
     def review(self, source_id, records, complete=True):
-        return {"schema_version": 1, "sources": [{"source_id": source_id, "complete": complete, "records": records}]}
+        return {"schema_version": 3, "sources": [{"source_id": source_id, "complete": complete, "records": records}]}
 
     def match_record(self):
         return {"type": "match", "competition": "European International Cup", "season": "2018/19",
@@ -153,6 +161,9 @@ class ImportTests(DatabaseTestCase):
         source_id = self.prepare_source(73, "white")
         document = self.review(source_id, [self.match_record()])
         approve_review(self.connection, document, "Verified against the screenshot")
+        fixture = self.connection.execute("SELECT * FROM matches").fetchone()
+        self.match_id = fixture["id"]
+        self.home_club_id = fixture["home_club_id"]
         return source_id, document
 
     def test_review_is_repeatable_and_competition_is_preseason(self):
@@ -234,6 +245,14 @@ class ImportTests(DatabaseTestCase):
         approve_review(self.connection, self.review(source_id, [record]), "Verified standalone preseason friendly")
         self.assertEqual(status(self.connection)["records"]["matches"], 1)
 
+    def test_club_alias_resolves_to_same_uuid_without_duplicate_club(self):
+        self.approved_match()
+        self.connection.execute("INSERT INTO club_aliases(alias, club_id) VALUES (?, ?)", ("nottscounty", self.home_club_id))
+        self.assertEqual(ensure_club(self.connection, "NottsCounty"), self.home_club_id)
+        self.assertEqual(ensure_club(self.connection, "NOTTS COUNTY"), self.home_club_id)
+        self.assertTrue(is_uuid(self.home_club_id))
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM clubs").fetchone()[0], 2)
+
     def test_extraction_never_overwrites_approved_data(self):
         source_id, document = self.approved_match()
 
@@ -256,10 +275,10 @@ class ImportTests(DatabaseTestCase):
         export_data(self.connection, output)
         exported = json.loads(output.read_text())
         self.assertEqual(len(exported["matches"]), 1)
-        self.assertIs(exported["competitions"][0]["is_preseason"], True)
+        self.assertIs(next(competition for competition in exported["competitions"] if competition["name"] == "European International Cup")["is_preseason"], True)
         backup = self.root / "backup.sqlite"
         backup_database(self.connection, backup)
-        with sqlite3.connect(backup) as restored:
+        with closing(sqlite3.connect(backup)) as restored:
             self.assertEqual(restored.execute("SELECT COUNT(*) FROM reviews").fetchone()[0], 1)
             self.assertEqual(restored.execute("PRAGMA integrity_check").fetchone()[0], "ok")
         with self.assertRaises(FileExistsError):
@@ -376,8 +395,12 @@ class ImportTests(DatabaseTestCase):
 
     def test_coverage_reports_differences_without_modifying_records(self):
         self.approved_match()
-        self.connection.execute("INSERT INTO players(name) VALUES ('Takefusa Kubo')")
-        self.connection.execute("INSERT INTO player_matches(match_id, player_id, club_id, displayed_position, goals, assists, rating, overall, shots_on_target, shots_off_target) VALUES (1, 1, 1, 'CAM', 0, 1, 8.4, 63, 1, 0)")
+        player_id = self.create_player("Takefusa Kubo")
+        insert_entity(self.connection, "player_matches", {
+            "match_id": self.match_id, "player_id": player_id, "club_id": self.home_club_id,
+            "displayed_position": "CAM", "goals": 0, "assists": 1, "rating": 8.4, "overall": 63,
+            "shots_on_target": 1, "shots_off_target": 0,
+        })
         self.connection.commit()
         report = coverage_report(self.connection)
         self.assertEqual(report["summary"]["matches"], 1)

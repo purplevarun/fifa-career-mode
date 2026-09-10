@@ -7,6 +7,8 @@ from pathlib import Path
 from PIL import Image
 
 from . import SCHEMA_VERSION
+from .identifiers import is_uuid, new_id
+from .migrations import migrate_to_uuids
 
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"}
@@ -34,7 +36,7 @@ def connect(database_path):
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON")
     version = connection.execute("PRAGMA user_version").fetchone()[0]
-    if version not in (0, 1, SCHEMA_VERSION):
+    if version not in (0, 1, 2, SCHEMA_VERSION):
         connection.close()
         raise ValueError(f"Unsupported database schema version: {version}")
     if version == 0:
@@ -45,8 +47,8 @@ def connect(database_path):
         try:
             connection.executescript(f"BEGIN;\n{schema}")
             connection.executemany(
-                "INSERT INTO competitions(name, kind, is_preseason) VALUES (?, ?, ?)",
-                COMPETITIONS,
+                "INSERT INTO competitions(id, name, kind, is_preseason) VALUES (?, ?, ?, ?)",
+                ((new_id(), *competition) for competition in COMPETITIONS),
             )
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             connection.commit()
@@ -54,14 +56,22 @@ def connect(database_path):
             connection.rollback()
             connection.close()
             raise
-    if version == 1:
-        with connection:
-            connection.execute("BEGIN IMMEDIATE")
-            connection.execute("ALTER TABLE player_matches ADD COLUMN goals_conceded_displayed INTEGER CHECK (goals_conceded_displayed >= 0)")
-            connection.execute("ALTER TABLE player_matches ADD COLUMN goals_conceded_basis TEXT")
-            connection.execute("UPDATE player_matches SET goals_conceded_displayed = goals_conceded WHERE goals_conceded IS NOT NULL")
-            connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+    if version in (1, 2):
+        try:
+            migrate_to_uuids(connection, database_path, Path(__file__).with_name("schema.sql").read_text(encoding="utf-8"))
+        except Exception:
+            connection.close()
+            raise
     return connection
+
+
+def insert_entity(connection, table, values):
+    identifier = new_id()
+    values = {**values, "id": identifier}
+    columns = ", ".join(values)
+    placeholders = ", ".join("?" for value in values)
+    connection.execute(f"INSERT INTO {table}({columns}) VALUES ({placeholders})", tuple(values.values()))
+    return identifier
 
 
 def image_hash(path):
@@ -90,10 +100,11 @@ def inventory(connection, root):
         for path in paths:
             if not path.resolve().is_relative_to(root):
                 raise ValueError(f"Image resolves outside the project: {path}")
-            source_id = image_hash(path)
+            sha256 = image_hash(path)
             counts["files"] += 1
-            known = connection.execute("SELECT id FROM source_images WHERE id = ?", (source_id,)).fetchone()
+            known = connection.execute("SELECT id FROM source_images WHERE sha256 = ?", (sha256,)).fetchone()
             if known:
+                source_id = known["id"]
                 counts["known_images"] += 1
             else:
                 width = height = None
@@ -105,12 +116,10 @@ def inventory(connection, root):
                 except (OSError, ValueError, SyntaxError) as exception:
                     error = str(exception)
                     counts["unreadable"] += 1
-                connection.execute(
-                    "INSERT INTO source_images(id, byte_size, width, height, status, error) "
-                    "VALUES (?, ?, ?, ?, ?, ?)",
-                    (source_id, path.stat().st_size, width, height,
-                     "error" if error else "inventoried", error),
-                )
+                source_id = insert_entity(connection, "source_images", {
+                    "sha256": sha256, "byte_size": path.stat().st_size, "width": width, "height": height,
+                    "status": "error" if error else "inventoried", "error": error,
+                })
                 counts["new_images"] += 1
             connection.execute(
                 "INSERT INTO source_paths(path, source_id, sequence, present) VALUES (?, ?, ?, 1) "
@@ -139,6 +148,11 @@ def validate_database(connection):
     if integrity != "ok":
         errors.append(integrity)
     errors.extend(str(tuple(row)) for row in connection.execute("PRAGMA foreign_key_check"))
+    for table in (*EXPORT_TABLES, "source_images", "reviews"):
+        if table.endswith("_sources"):
+            continue
+        if any(not is_uuid(row[0]) for row in connection.execute(f"SELECT id FROM {table}")):
+            errors.append(f"{table}: invalid UUID primary key")
     for table in ("team_matches", "player_matches"):
         invalid = connection.execute(
             f"SELECT record.id FROM {table} record JOIN matches fixture ON fixture.id = record.match_id "
