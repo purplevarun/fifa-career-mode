@@ -6,21 +6,22 @@ Last updated: 2026-09-10
 
 Build a trustworthy career dataset for a React application that visualizes Notts County match, player, season, and competition statistics.
 
-- Original screenshots in `raw_data/` are the source of truth. Read the images, not just the existing OCR text.
+- SQLite in `data/career.sqlite` is the authoritative store for validated application data, reviewed corrections, and import progress. Original screenshots in `raw_data/` remain immutable evidence for checking those records.
 - Include every captured match, including preseason games. Missing evidence must be tracked, not silently omitted.
 - Every imported match must reference a competition edition. No orphan matches and no nullable competition relationship.
 - Add `Competition.is_preseason` as a required boolean. Preseason tournaments are real competitions in this model.
 - `Player_Match` is the central performance table, with one record per player per match.
 - Player snapshots are essential: preserve season-start, season-end, and other dated observations of overall rating and player details.
-- Recommended storage: SQLite for validated relational data; structured JSON for extraction evidence and exports to React.
-- Preserve the current screenshots, text files, and OCR script. Do not overwrite them during the new extraction process.
+- The user confirmed that the first three screenshots are a player-data capture group, not match screens. Similar groups recur at season end or the start of the next season; process them as squad snapshots independently of match groups.
+- Implemented storage: SQLite contains image inventory, structured OCR evidence, review history, and canonical records. JSON exports are a read-only copy for React; editable review JSON is an interchange format, not a second authoritative database.
+- On the user's 2026-09-10 instruction, the obsolete text-only OCR script and all 1,296 generated text files were removed. All 1,296 original screenshots are preserved. The replacement never reads the retired text pipeline.
 - Build and validate the data pipeline before building the React application. A static JSON-backed app can come first; an editing API can come later.
 
 Scope initially covers this one career save. If another save is added, introduce explicit career scoping before mixing records.
 
 ## 2. Current Evidence and Its Limits
 
-The initial analysis scanned all existing text outputs and spot-checked two original player-performance screenshots. This is discovery work, not a completed screenshot extraction.
+The initial analysis scanned the legacy text outputs and spot-checked two original player-performance screenshots. The following historical counts were recorded before the text was removed. Current screenshot extraction and import progress is in section 7; the complete archive has not been imported.
 
 | Screen category inferred from text | Files |
 | --- | ---: |
@@ -33,13 +34,13 @@ The initial analysis scanned all existing text outputs and spot-checked two orig
 | Competition result | 1 |
 | Total | 1,296 |
 
-- There are 1,296 source image files and 1,296 text files. Equal counts do not establish a verified one-to-one mapping; build a manifest to check that.
-- Text totals approximately 636 KB. There were no identical trimmed text outputs, but different OCR outputs can describe the same screen or match.
+- There were 1,296 source images and 1,296 text files. The new image inventory has independently verified 1,296 readable images with 1,296 distinct content hashes.
+- Legacy text totaled approximately 636 KB. There were no identical trimmed text outputs, but different OCR outputs can describe the same screen or match.
 - Date and competition normalization produced 85 provisional fixture groups from 95 match summaries, spanning 2018-07-04 through 2019-11-02.
 - Ten fixture groups have repeated summary captures. Do not import each summary as a new match.
 - Provisional numeric screenshot groups contain 11-17 player-performance captures per match. These are not verified unique appearances.
 - Text classification found 88 goalkeeper-performance screens and one opponent-performance screen: Sam Hoskins of Northampton in `Screenshot_976.txt`. Do not assume every player screen is a Notts County player.
-- No complete identity resolution, fixture verification, player-row extraction, or database import has been performed.
+- These discovery counts are not verified canonical totals. Current imported records are a reviewed pilot subset; identity resolution across the whole archive remains unfinished.
 
 ### Provisional competition inventory
 
@@ -61,9 +62,10 @@ If images reveal a standalone preseason friendly, assign it to an explicit prese
 
 ### Known source limitations
 
-- [The existing OCR script](process_images_to_text.py) keeps text only, discarding bounding boxes and recognition confidence.
-- In [the Elliott Hewitt text sample](processed_data/Screenshot_1002.txt), visible zeroes were dropped and attacking/defending columns interleaved. The original image was spot-checked.
-- [The Aaron Ramsdale sample](processed_data/Screenshot_108.txt) has a different goalkeeper layout. Its original image was also spot-checked.
+- The retired OCR script kept text only, discarding bounding boxes and recognition confidence.
+- In [the Elliott Hewitt source](raw_data/Screenshot%20%281002%29.png), the old OCR dropped visible zeroes and interleaved attacking/defending columns.
+- [The Aaron Ramsdale source](raw_data/Screenshot%20%28108%29.png) uses a different goalkeeper layout. It has now been visually reviewed and imported.
+- Direct cropped-cell recognition recovers many of the missing digits, but some zeroes, names, separators, and clock readings still need correction. OCR confidence is often low; no OCR candidate is automatically approved.
 - Some match summary text omits the score entirely. A missing score is not 0-0.
 - OCR confuses labels and dates, including `Tw0`, `0ne`, `0ctober`, merged words, and missing spaces.
 - Standings are partial dashboard snapshots, not a full archive of every club's results.
@@ -74,6 +76,8 @@ If images reveal a standalone preseason friendly, assign it to an explicit prese
 ## 3. Planned Data Model
 
 Names below describe logical entities; implementation naming can follow consistent SQLite conventions. Use stable IDs independent of filenames, spelling corrections, ratings, and scores.
+
+The implemented schema is [career_data/schema.sql](career_data/schema.sql), version 1. Tables use plural snake_case names. The importer refuses unsupported schema versions and existing unversioned databases instead of overwriting them.
 
 | Entity | Main responsibility and fields |
 | --- | --- |
@@ -131,7 +135,18 @@ Snapshots are historical observations, not mutable fields on `Player`.
 - Preserve multiple observations per player per season, resolve duplicate captures, and record conflicting values for review instead of overwriting them.
 - Compare start and end OVR only when both observations are supported. Distinguish within-season development from the gap between one season's end and the next season's start.
 
-Starting candidates: the opening squad images corresponding to [Screenshot_70](processed_data/Screenshot_70.txt) and the end-of-season squad images around [Screenshot_1055](processed_data/Screenshot_1055.txt). Their apparent Aaron Ramsdale OVR observations are 62 and 65 respectively in text. These are candidates for image verification, not yet approved season-boundary records. Season 2019/20 end-of-season coverage is not established by this archive.
+### User-confirmed squad capture groups
+
+On 2026-09-10, the user confirmed that the first three images capture player data: [raw_data/Screenshot (70).png](raw_data/Screenshot%20%2870%29.png), [raw_data/Screenshot (71).png](raw_data/Screenshot%20%2871%29.png), and [raw_data/Screenshot (72).png](raw_data/Screenshot%20%2872%29.png). Together they form the opening squad capture group. This pattern can recur at the end of a season or the beginning of the next season.
+
+- Collect every visible player row across the group, not only the selected player's detail panel. Create or reuse `Player` identities and record their visible OVR and other supported details in `Player_Snapshot`.
+- Merge overlapping roster rows within the same capture group and retain their source evidence. Repeated rows are not extra players or extra appearances. Apply selected-panel details only to the selected player, never to every row on that screenshot.
+- Keep these squad snapshots independent of fixtures: no `match_id` and no `Player_Match` records should be created from them.
+- Keep later capture groups as separate historical observations, even when a player's OVR is unchanged. Establish `season_start` versus `season_end` and the correct season from career context; do not collapse a closing snapshot into the next season's opening snapshot.
+- Do not assume every future group contains exactly three screenshots, that every squad screen marks a season boundary, or that its exact capture date is known. Preserve date precision and its basis.
+- Implementation follow-up: the current extractor proposes only the selected profile from each squad screen. Full roster-table extraction and group-level overlap resolution remain to be implemented. Do not mark the opening three-image group complete after importing only its selected profiles.
+
+Verified boundary examples: [the opening squad image](raw_data/Screenshot%20%2870%29.png) shows Aaron Ramsdale at OVR 62, age 20, and [the closing squad image](raw_data/Screenshot%20%281055%29.png) shows OVR 65, age 21, with a displayed +3 change. Both are now imported as 2018/19 boundary observations with season-level date precision, not invented exact dates. Their date-basis fields describe the neighboring preseason and season-end evidence. Season 2019/20 end-of-season coverage is not established by this archive.
 
 `Player_Competition_Snapshot` is a separate reconciliation source. Captured cumulative totals must never be added to the per-match totals. Preserve their observation date and exact competition/club scope; retain all-competition totals as such rather than assigning them to an invented competition.
 
@@ -153,11 +168,11 @@ Discriminating check: manually transcribe a small set of source images, includin
 ### Phase A: Inventory and classification
 
 1. Inventory every original image recursively. Record original path, SHA-256 hash, dimensions, and the numeric screenshot sequence when present.
-2. Check image readability, duplicate content, filename collisions, and correspondence with text outputs. Preserve original names and bytes; do not rename the archive.
+2. Check image readability, duplicate content, and filename collisions. Preserve original names and bytes; do not rename the archive. SQLite `source_images` and `source_paths` hold the inventory.
 3. Sort by numeric sequence for navigation, not lexical filename order. Filesystem timestamps are not in-game dates.
 4. Classify from the images: match facts, outfield performance, goalkeeper performance, squad status/stats, transfer detail, news, career dashboard, competition result, or unknown.
-5. Use existing text only as a navigation hint or secondary cross-check. Uncertain classification remains explicit in the manifest.
-6. Track per-source state: inventoried, classified, extracted, needs_review, validated, imported, or error. A source with an error must remain visible in coverage reports.
+5. Classify using the original images. The historical text findings in this document are navigation hints only; the old text files no longer exist.
+6. Track per-source state in SQLite: `inventoried`, `needs_review`, `imported`, `rejected`, or `error`, with screen type tracked separately. Classification and extraction are currently implemented for a subset of layouts. An approved partial source remains `needs_review`; its checked records still enter the canonical tables.
 
 ### Phase B: Pilot before bulk extraction
 
@@ -173,7 +188,7 @@ Also inspect the squad snapshot candidates above and at least one permanent-tran
 
 1. Read the whole anchor image, establish date/competition/clubs, and inspect numeric neighbors until the fixture boundary is confirmed. Do not assume a fixed number of images per match.
 2. Manually establish expected values for the pilots. Include every visible field needed for the intended import, not just the final score.
-3. Use image viewing and region crops as the primary extraction surface. Reuse the existing RapidOCR dependency if helpful, but retain its bounding boxes and confidence instead of flattening the output.
+3. Use image viewing and region crops as the primary extraction surface. The implementation pins RapidOCR 1.2.3 and retains full-image OCR tokens, crop coordinates, recognition confidence, extractor version, and raw readings in SQLite.
 4. Extract template-specific regions: header/score, club labels, player identity, attacking, defending, goalkeeping, squad rows, and transfer/news panels.
 5. Normalize crop coordinates to each image's dimensions; confirm layouts before applying templates to another resolution or screen variant. Retain the original coordinate mapping for evidence.
 6. Exclude crests, background banners, menu hints, and overlays from data fields. Inspect crops directly when text is ambiguous.
@@ -203,9 +218,9 @@ Also inspect the squad snapshot candidates above and at least one permanent-tran
 
 1. Create the versioned SQLite schema with required foreign keys, unique keys, and type/range checks.
 2. Import only records meeting required identity and relationship checks. Keep unresolved candidates in staging and report them; never discard them silently.
-3. Preserve source associations for canonical records using appropriate junction tables. Detailed field-level evidence can remain in versioned extraction JSON linked from the database.
+3. Preserve source associations with `match_sources`, `player_match_sources`, and source foreign keys on the other records. Structured extraction evidence and reviewed payloads are stored as JSON inside SQLite, so removing scratch review files does not remove approved corrections.
 4. Use transactions and idempotent imports. Reprocessing unchanged sources must not create new players, matches, appearances, snapshots, or events.
-5. Keep reviewed corrections separately from machine candidates. A rerun may propose a conflict, but must not erase a reviewed correction.
+5. Keep reviewed corrections separately from machine candidates. A rerun may propose a conflict, but must not erase a reviewed correction. Normal imports fill unknown fields and reject conflicting known values; explicit `--replace-reviewed` permits intentional corrections, including clearing a value to null, and appends an audit record. Identity changes involving already-linked matches or appearances are rejected and require a separate reviewed migration.
 6. Export stable-ID JSON datasets and derived summaries with a schema version, generation time, provenance references, and coverage information.
 7. Recompute derived results after approved corrections. React consumes validated records and exposes known coverage limits; it does not parse OCR.
 
@@ -225,31 +240,108 @@ Also inspect the squad snapshot candidates above and at least one permanent-tran
 - Export integrity: validate JSON structure, foreign references, null handling, preseason inclusion, snapshot history, and aggregate consistency with SQLite.
 - Publication honesty: label partial coverage and do not advertise full-league histories, minutes-based metrics, or timeline events that the images do not support.
 
-## 6. Planned Artifacts and Reproducibility
-
-Only this document is being created at the documentation checkpoint. The following data artifacts and commands do not exist yet; settle their exact filenames while implementing the pilot.
+## 6. Implemented Workflow and Reproducibility
 
 ```text
-raw_data/                    existing immutable screenshots
-processed_data/              existing legacy text, navigation only
-process_images_to_text.py    existing script, unchanged
-DATA_PROCESS.md              this living plan and handoff
+raw_data/                    immutable original screenshots
+career_data/
+  __main__.py                command-line interface
+  database.py                initialization, inventory, integrity checks
+  extraction.py              screenshot classification and crop recognition
+  pipeline.py                staging, review, canonical imports, export, backup
+  schema.sql                 relational schema, constraints, source links
+tests/                       focused importer and real-image OCR tests
+requirements.txt             pinned direct image/OCR dependencies
+DATA_PROCESS.md              living workflow and handoff
 data/
-  source_manifest.json      image inventory and per-source progress
-  staging/                  structured, source-linked extraction candidates
-  corrections.json          explicit reviewed overrides and reasons
-  review_queue.json         unresolved fields, identities, and associations
-  career.sqlite             validated canonical data
-  exports/                  versioned JSON for React
+  career.sqlite              canonical data, source inventory, OCR, reviews
+  review/                    editable scratch review documents
+  exports/career.json         derived read-only dataset for React
+  backups/                   consistent local SQLite backup copies
 ```
 
-- Give extraction artifacts a schema version, extractor version, source hash, and timestamps. Crop/preprocessing settings must be reproducible.
-- Store paths relative to the repository; do not encode a particular user's machine path into data.
-- Choose and document runnable inventory, pilot, batch, validation, import, and export commands as they are implemented. Do not present unimplemented commands as ready to run.
-- Prefer the existing Python direction and standard-library SQLite support; choose OCR changes based on pilot evidence. No new framework, hosted database, or remote image upload is required.
-- Use a project-local environment for dependencies and record versions. Avoid changing the system Python or requiring administrator access.
-- The current terminal has Node available, but `rg` was unavailable during initial analysis. Use available workspace search tools for inspection.
-- Preserve originals and reviewed corrections as authoritative inputs. Generated outputs should be reproducible; inspect existing ignore rules before deciding which large artifacts to commit.
+SQLite is not a disposable generated file: it contains human-reviewed corrections and progress that automatic OCR alone cannot reproduce. It is eligible for version control. Scratch review files, exports, SQLite journal files, and local backups are ignored by Git. No implementation changes have been committed or pushed yet. Preserve both the database and original screenshots when moving or backing up the project; a local backup alone does not protect against loss of the machine.
+
+### Runtime and setup
+
+The implementation was verified with the already-installed Python 3.14.5, SQLite 3.50.4, Pillow 12.2.0, and rapidocr-onnxruntime 1.2.3. It uses standard-library SQLite and runs OCR locally, without uploading images. Python 3.11 or later is required. Dependencies are listed in [requirements.txt](requirements.txt).
+
+For an isolated environment on a fresh machine:
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+```
+
+Use `.venv/bin/python` in place of `python3` below when using that environment. No administrator permissions or system-wide installation is required. The current implementation run used the already-available interpreter and dependencies; it did not create a new virtual environment.
+
+### Adding screenshots
+
+1. Add images to `raw_data/`, using new filenames. Do not overwrite existing screenshots. Numeric filename sequences help navigation but are not in-game dates or guaranteed match IDs.
+2. Run the incremental import command. It inventories all images but OCRs at most 20 unprocessed images by default. Rerun to continue; unchanged images with extraction results are skipped by content hash.
+
+```sh
+python3 -m career_data import --limit 20
+python3 -m career_data status
+```
+
+The initial archive still has many pending images, so this command resumes that backlog first. To target newly added screenshots, use an explicit selection:
+
+```sh
+python3 -m career_data import --screenshots 1159 --limit 1
+```
+
+`--screenshots` accepts numbers and inclusive ranges, such as `73,76,808-810`. Every requested number must exist; gaps are reported rather than silently skipped. `remaining` in the import report refers to that run's selection, not the whole archive. Use `status` for overall coverage.
+
+3. Export an editable review document for the selected images. Choose a new output filename each time; the command deliberately refuses to overwrite an existing review file.
+
+```sh
+python3 -m career_data review --screenshots 1159 --output data/review/wycombe-check.json
+```
+
+Inspect the original images and correct the `records` in that file. Keep the `source_id` unchanged. Set `complete` to true only after reviewing the relevant data for the source; leave it false when other rows or facts on that image remain outstanding. A generated document for a previously reviewed source starts from its reviewed payload, not fresh OCR guesses. Raw OCR/crop evidence remains available in the `extractions` table.
+
+Match records must have a verified date, competition, season, and home/away clubs. Missing scores stay null. A newly named competition also requires `competition_kind` and boolean `is_preseason`; the seven known competitions are already registered. The career uses July-June seasons, and exact match/snapshot dates are checked against their assigned season.
+
+Player-performance records need a confirmed `match_id`, or a `match_source_id` that resolves to one approved match. The review command can propose a known match ID for explicitly selected performance images:
+
+```sh
+python3 -m career_data review --screenshots 74-87 --match 1 --output data/review/opening-check.json
+```
+
+This sets review context only. Verify the association visually before approval. The importer never guesses a player's match solely from the preceding filename.
+
+For unimplemented layouts, the generated `records` list is empty and the source remains queued. Manual transcription into supported record types is possible: `match`, `player_match`, `player_snapshot`, `player_competition_snapshot`, `player_transfer`, and `competition_event`. An empty record list cannot be approved. See the existing pilot review in SQLite for examples; standings do not yet have a canonical table or importer.
+
+4. Approve the checked document. The entire document is imported in one transaction; invalid fields, broken relationships, or conflicting known values roll back the batch. JSON for React is refreshed after approval.
+
+```sh
+python3 -m career_data approve data/review/wycombe-check.json --note "Describe what was checked against the original images"
+python3 -m career_data validate
+```
+
+Do not run approval merely because OCR completed. In this first version, every new extraction requires visual review. Repeating an unchanged approval does not duplicate canonical records. Intentional corrections to previously known values require `--replace-reviewed`; do not use that flag for routine reruns. A later image of an existing player or fixture merges into its existing identity when the reviewed identifiers agree, or raises a conflict rather than overwriting a different observation.
+
+### Maintenance commands
+
+```sh
+python3 -m career_data inventory
+python3 -m career_data export
+python3 -m career_data import --screenshots 108 --limit 1 --reextract
+python3 -m career_data backup data/backups/manual-checkpoint.sqlite
+python3 -m unittest discover -s tests -v
+CAREER_OCR_TESTS=1 python3 -m unittest discover -s tests -v
+```
+
+- `inventory` performs no OCR. Source IDs are SHA-256 content hashes; different filenames for identical bytes share one source.
+- `export` regenerates `data/exports/career.json`, including stable IDs, relationships, real boolean preseason flags, source references, and coverage counts. React can fetch this JSON without opening SQLite in the browser.
+- `--reextract` refreshes machine candidates but never canonical records or reviewed corrections. Unsupported layouts and extraction errors remain visible for follow-up.
+- `backup` uses SQLite's backup API and refuses an existing destination. Use a new name for each checkpoint. The current verified copy is `data/backups/2026-09-10-pilot.sqlite`.
+- The default test command skips four real-image OCR tests. Setting `CAREER_OCR_TESTS=1` runs all 29 tests against the included original images as well as temporary-database tests.
+- Global `--root` and `--db` options go before the subcommand, for example `python3 -m career_data --db data/career.sqlite status`.
+- Source paths and crop coordinates are repository-relative and normalized. The extractor currently supports the observed 1366x768 layout and proportionally scaled 16:9 images; different aspect ratios are queued instead of using incorrect crop coordinates. Same-aspect layouts with different UI placement still require visual review.
+- RapidOCR 1.2.3 exposes `text_recognizer(crops)`, not the newer `text_rec` interface. Its `use_det=False` call keyword does not disable detection. The implementation calls the pinned recognizer directly for numeric cells; keep this in mind before upgrading OCR.
+- `rg` was unavailable in this terminal; use available workspace search tools. No system packages or editor extensions were installed.
 
 ## 7. Progress and Resume Checkpoint
 
@@ -257,31 +349,57 @@ data/
 
 - [x] Initial text inventory and representative source-image spot checks.
 - [x] Record confirmed requirements, provisional findings, model, validation gates, and handoff process.
-- [ ] Inventory and classify every source image in a persistent manifest.
-- [ ] Verify the three pilot fixtures and associated player screens directly from images.
-- [ ] Verify opening/end-of-season squad snapshots and transfer/loan examples.
-- [ ] Implement and pass structured extraction and validation for the pilot.
+- [x] Inventory all 1,296 original images with hashes, dimensions, and readability checks in SQLite.
+- [x] Implement and test extraction/review/import/export/backup commands.
+- [x] Verify the opening preseason fixture and all 14 associated player-performance screens.
+- [x] Verify the other pilot match headers, including shootout separation and the first League One fixture.
+- [ ] Complete the player-performance groups for the remaining pilot fixtures.
+- [x] Verify example opening/end-of-season player snapshots, season totals, and transfer/loan facts; retain incomplete source coverage.
+- [x] Pass focused unit and real-screenshot validation for the implemented layouts and importer.
 - [ ] Establish canonical identities, fixture boundaries, and season anchors.
 - [ ] Extract and review all remaining screenshot families in batches.
 - [ ] Reconcile match data against season snapshots and standings evidence.
-- [ ] Create and validate the SQLite import, including rerun/correction behavior.
-- [ ] Produce verified JSON exports and coverage summaries.
+- [x] Create and validate the SQLite import, including rerun/correction behavior and a backup.
+- [x] Produce the first verified, explicitly partial JSON export and coverage counts.
 - [ ] Build the React visualization application on the validated dataset.
 
-### Latest checkpoint: 2026-09-10, documentation
+### Latest checkpoint: 2026-09-10, first working importer
 
-- Completed: initial discovery and this process specification.
-- Source images spot-checked so far: `Screenshot (1002).png` and `Screenshot (108).png`, for OCR limitations only. Neither represents a fully extracted/validated fixture.
-- Canonical fixtures imported: 0. Player-match records imported: 0. Player snapshots imported: 0.
-- Last completed extraction batch: none. No source manifest, staging JSON, extraction implementation, SQLite database, or React application has been created.
-- Existing data files and the legacy OCR script remain unchanged.
-- Immediate next action: inventory the original images and begin the three-fixture pilot, starting with `Screenshot (73).png` and its visually confirmed player-screen sequence.
-- Known open issues: reliable score/stat reading, repeat capture resolution, player identity variants, match-to-player linkage, exact snapshot dates, and incomplete/unreadable observations.
+- Database: `data/career.sqlite`, schema version 1; approximately 1.4 MB at this checkpoint. Backup: `data/backups/2026-09-10-pilot.sqlite`. React export: `data/exports/career.json`.
+- Inventory: 1,296 readable, distinct source images; no original screenshots modified or removed.
+- Extracted/classified: 25 images. Source states: 19 `imported`, 6 `needs_review`, 1,271 `inventoried` and awaiting extraction.
+- Canonical records: 16 players, 5 clubs, 2 seasons, 7 competitions, 6 competition editions, 4 matches, 8 team-match rows, 15 player-match rows, 17 player snapshots, 6 player-competition snapshots, 2 transfers, and 2 competition events.
+- Complete Notts County player group: match 1 has 14 unique player-performance records. Their 1 goal, 1 assist, 5 shots on target, 1 shot off target, and goalkeeper's 1 goal conceded reconcile with the corresponding summary. Starting status and minutes remain unknown.
+- Snapshot history includes Ramsdale's 2018/19 opening OVR 62 and closing OVR 65, with season-level date precision, plus 15 match-time OVR observations across the imported appearances. Captured season totals are stored separately, not added to appearance aggregates.
+- Reviewed sources: 70, 73-87, 101, 108, 808, 1053, 1055, 1124, 1159, and 1231. Source 1054 was visually checked for May 2019 context and final standings but has no canonical record yet.
+- Partial sources still queued: 70 and 1055 (other squad rows), 1053 (other news), 1124 and 1231 (dates, financial details, and profile/other offer rows), and 1054 (dashboard/standings).
+- Transfer examples are Matty James, permanent, and Dominic Calvert-Lewin, loan. Unknown selling/lending clubs, year-qualified transfer dates, currency codes, and fees were not invented. Contract and loan durations are separate; displayed wages remain in source evidence pending financial normalization.
+- Competition events: Notts County's 2018/19 League Two title and Ramsdale's goalkeeper award, both announced 2019-05-04. Other news headlines do not establish award recipients and were not guessed.
+- Scratch review documents: `data/review/pilot.json` and `data/review/opening-match.json`. Approved payloads and review notes are stored in SQLite, so these files are not required to preserve approved data. They may be regenerated with `review` using a new filename.
+- Validation completed: all 29 tests passed with `CAREER_OCR_TESTS=1`; SQLite integrity and foreign-key checks passed; reapproving the 14-player review skipped all 14 sources without duplicates; forced OCR refresh of source 108 preserved its reviewed zero assists and clearances; original-image Git diff was empty.
+- Removed at user request: the legacy Python OCR script and 1,296 generated text files. The implementation, database, and current document changes have not been committed or pushed.
+
+| Match ID | Date | Fixture and score | Competition edition | Imported player rows |
+| --- | --- | --- | --- | ---: |
+| 1 | 2018-07-04 | Notts County 1-1 Dundee FC | European International Cup 2018/19, preseason | 14 |
+| 2 | 2018-07-08 | Livorno 0-1 Notts County | European International Cup 2018/19, preseason | 1 |
+| 3 | 2019-02-14 | Notts County 0-0 Shrewsbury; 4-3 on penalties | Checkatrade Trophy 2018/19 | 0 |
+| 4 | 2019-08-03 | Notts County 1-1 Wycombe | EFL League One 2019/20 | 0 |
+
+### Exact next work
+
+1. Read `status` and the existing database; do not reinitialize or delete it. The opening fixture is already reviewed and must not be recreated.
+2. Complete the player screens around sources 808 and 1159 for matches 3 and 4, confirming their boundaries from images. The documented three-fixture pilot is not complete until those groups are reviewed. Match 2 also has only its goalkeeper so far.
+3. Inspect the next-season Invitational Cup images and import that preseason edition; its competition is already registered with `is_preseason = true`, but no Invitational match has been imported yet.
+4. Complete opening/closing squad snapshots for the other players, resolving aliases against the 16 existing identities. Keep uncertainty about exact observation dates explicit.
+5. Improve the remaining cell-level OCR misses, particularly zero clearances and some goalkeeper assists, using image-based tests. Do not loosen validation or turn arbitrary missing values into zero.
+6. Add and verify transfer/news/standings layouts as needed. Current automated extraction covers match facts, outfield performance, goalkeeper performance, and the selected squad profile only; other screens retain full OCR evidence for manual review.
+7. Continue extraction in bounded batches and reconcile the full match history with captured competition totals and final standings. The archive is not yet ready to present as a complete career dataset.
 
 ### How to resume and update this document
 
 1. Read this document and check the current worktree. Preserve unrelated user changes.
-2. Read the latest checkpoint plus the manifest and review queue, if implemented. Do not restart from screenshot 70 solely because this document contains an initial checkpoint.
+2. Read the latest checkpoint and SQLite source states, extractions, and reviews. Do not restart from screenshot 70 solely because it is the first image.
 3. Inspect the most recent validated fixture and any pending partial batch before selecting new work. Use explicit source states, not just the largest filename processed.
 4. Continue the next unchecked milestone. If evidence changes the schema or extraction approach, record the decision and reason here before broad reprocessing.
 5. After every batch or significant decision, update the milestone status and checkpoint with source IDs, fixture IDs, completed counts by entity, unresolved IDs/reasons, commands/checks actually run, and the exact next action.
@@ -289,7 +407,10 @@ data/
 
 ### Decision log
 
-- 2026-09-10: Use the raw screenshots as primary evidence; legacy OCR is a discovery aid only.
+- 2026-09-10: Use the raw screenshots as primary evidence. Initial legacy OCR findings are retained here as historical discovery notes only.
 - 2026-09-10: All matches, including preseason, must belong to a competition edition; `Competition.is_preseason` is required.
 - 2026-09-10: Preserve player snapshots, particularly season-start/end OVR and their date certainty, instead of overwriting player attributes.
-- 2026-09-10: Recommend SQLite canonical storage with structured extraction JSON and frontend JSON exports; implementation waits for the screenshot pilot.
+- 2026-09-10: Implement SQLite as the canonical application store, including structured OCR evidence, corrections, and progress. Export JSON for React; no backend API or React UI has been built yet.
+- 2026-09-10: Remove the legacy OCR script and generated text at the user's request, while preserving every original screenshot.
+- 2026-09-10: Require visual approval in this first importer version. Numeric crop extraction is useful but not sufficiently reliable for unattended canonical imports.
+- 2026-09-10: Keep the database eligible for version control and provide explicit SQLite backups; ignore only scratch reviews, derived exports, journals, and local backup copies.
