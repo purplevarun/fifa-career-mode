@@ -31,6 +31,7 @@ def main(argv=None):
     importer = commands.add_parser("process", aliases=["import"], help="Scan raw_screenshots and save new OCR results to SQLite")
     importer.add_argument("--screenshots", help="Numeric selection, for example 73,76,808-810")
     importer.add_argument("--limit", type=int, help="Optional maximum images to OCR; default processes all new images")
+    importer.add_argument("--clean", action="store_true", help="Back up and reset SQLite, then OCR all current screenshots; clears reviewed stats")
     importer.add_argument("--reextract", action="store_true", help="Refresh OCR candidates without changing reviewed records")
     reviewer = commands.add_parser("review", help="Write an editable review document; never overwrites an existing file")
     reviewer.add_argument("--screenshots", help="Optional numeric screenshot selection")
@@ -47,6 +48,22 @@ def main(argv=None):
     arguments = parser.parse_args(argv)
     root = arguments.root.resolve()
     database_path = (arguments.db or root / "processing" / "data" / "career.sqlite").resolve()
+    reset = {}
+    if arguments.command in {"process", "import"} and arguments.clean:
+        if arguments.screenshots is not None or arguments.limit is not None:
+            raise ValueError("--clean cannot be combined with --screenshots or --limit; a clean rebuild processes all screenshots")
+        reset["clean"] = True
+        print("Clean rebuild: existing stats, approvals, and processing history will be reset.", flush=True)
+        if database_path.exists():
+            backup_path = database_path.parent / "backups" / f"{database_path.stem}-before-clean-{new_id()}.sqlite"
+            with closing(sqlite3.connect(database_path.as_uri() + "?mode=rw", uri=True)) as previous:
+                reset.update(backup_database(previous, backup_path))
+                with closing(sqlite3.connect(backup_path.as_uri() + "?mode=ro", uri=True)) as saved:
+                    if saved.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                        raise ValueError("Backup integrity check failed; existing database was not reset")
+                print(f"Existing database backed up to {backup_path}", flush=True)
+                with closing(connect(":memory:")) as fresh:
+                    fresh.backup(previous)
     if arguments.command == "data":
         if not database_path.is_file():
             raise ValueError("No local stats database yet. Run ./run process first.")
@@ -86,7 +103,7 @@ def main(argv=None):
             results = extract_pending(connection, root, parse_sequences(arguments.screenshots), arguments.limit,
                                       arguments.reextract, progress=lambda message: print(message, flush=True))
             source_ids = results.pop("processed_source_ids")
-            result = {"database": str(database_path), "inventory": manifest, "extraction": results}
+            result = {"database": str(database_path), "inventory": manifest, "extraction": results, **reset}
             if source_ids:
                 review = make_review(connection, source_ids=set(source_ids))
                 review_path = database_path.parent / "reviews" / f"review-{new_id()}.json"
@@ -94,7 +111,8 @@ def main(argv=None):
                 result["review_file"] = str(review_path)
                 result["next"] = "Check the new OCR values against the originals, then run python3 -m processing approve <review_file> --note 'Checked'."
             else:
-                result["message"] = "No new OCR results. Saved stats are unchanged."
+                result["message"] = ("No OCR results were saved. The reset database contains no reviewed stats."
+                                     if arguments.clean else "No new OCR results. Saved stats are unchanged.")
             print(json_text(result), end="")
             return 1 if results["errors"] else 0
         elif arguments.command == "review":

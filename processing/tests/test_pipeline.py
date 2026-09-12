@@ -663,11 +663,13 @@ class CommandTests(DatabaseTestCase):
 
     def test_launcher_process_forwards_arguments_from_repository_root(self):
         repository = Path(__file__).resolve().parents[2]
-        result = self.launcher("process", "--limit", "2", "--screenshots", "73,74")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.splitlines(), [
-            str(repository), "-m", "processing", "process", "--limit", "2", "--screenshots", "73,74",
-        ])
+        for arguments in (("--limit", "2", "--screenshots", "73,74"), ("--clean",)):
+            with self.subTest(arguments=arguments):
+                result = self.launcher("process", *arguments)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.splitlines(), [
+                    str(repository), "-m", "processing", "process", *arguments,
+                ])
 
     def test_launcher_only_exposes_start_and_process(self):
         for arguments in ((), ("-h",), ("--help",), ("help",)):
@@ -699,6 +701,106 @@ class CommandTests(DatabaseTestCase):
         self.assertNotIn("review_file", repeat)
         self.extractor.extract.assert_called_once()
         self.assertNotIn("source_images", self.command("data"))
+
+    def test_process_clean_backs_up_reviewed_data_and_reprocesses_known_images(self):
+        image = self.create_image()
+        original_bytes = image.read_bytes()
+        first = self.command("process")
+        self.command("approve", first["review_file"], "--note", "Checked before clean")
+        source_id = self.connection.execute("SELECT id FROM source_images").fetchone()[0]
+        match_id = self.connection.execute("SELECT id FROM matches").fetchone()[0]
+        self.connection.close()
+
+        cleaned = self.command("process", "--clean")
+
+        self.assertTrue(cleaned["clean"])
+        self.assertEqual(cleaned["inventory"]["new_images"], 1)
+        self.assertEqual(cleaned["extraction"]["extracted"], 1)
+        self.assertEqual(cleaned["extraction"]["skipped"], 0)
+        self.assertEqual(self.command("data")["matches"], [])
+        self.assertEqual(image.read_bytes(), original_bytes)
+        self.assertTrue(Path(first["review_file"]).is_file())
+        with closing(sqlite3.connect(cleaned["backup"])) as backup:
+            self.assertEqual(backup.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+            self.assertEqual(backup.execute("SELECT id FROM matches").fetchone()[0], match_id)
+            self.assertEqual(backup.execute("SELECT id FROM source_images").fetchone()[0], source_id)
+            self.assertEqual(backup.execute("SELECT COUNT(*) FROM reviews").fetchone()[0], 1)
+        with closing(connect(cleaned["database"])) as rebuilt:
+            self.assertNotEqual(rebuilt.execute("SELECT id FROM source_images").fetchone()[0], source_id)
+            self.assertEqual(rebuilt.execute("SELECT COUNT(*) FROM reviews").fetchone()[0], 0)
+            self.assertEqual(validate_database(rebuilt), [])
+        self.assertEqual(self.command("process")["extraction"]["extracted"], 0)
+        self.assertEqual(self.extractor.extract.call_count, 2)
+
+    def test_clean_creates_missing_default_database_without_touching_other_sqlite(self):
+        from processing.__main__ import main
+
+        self.create_match()
+        self.connection.commit()
+        self.create_image()
+        output = io.StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(main(["--root", str(self.root), "process", "--clean"]), 0)
+        text = output.getvalue()
+        result = json.loads(text[text.index("{"):])
+        self.assertEqual(result["database"], str((self.root / "processing" / "data" / "career.sqlite").resolve()))
+        self.assertTrue(result["clean"])
+        self.assertNotIn("backup", result)
+        self.assertEqual(result["extraction"]["extracted"], 1)
+        with closing(connect(result["database"])) as rebuilt:
+            self.assertEqual(rebuilt.execute("SELECT COUNT(*) FROM matches").fetchone()[0], 0)
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM matches").fetchone()[0], 1)
+
+    def test_clean_with_empty_screenshot_folder_resets_stats_and_preserves_backup(self):
+        self.create_match()
+        self.connection.commit()
+
+        result = self.command("process", "--clean")
+
+        self.assertEqual(result["inventory"]["files"], 0)
+        self.assertEqual(result["extraction"]["extracted"], 0)
+        self.assertNotIn("review_file", result)
+        self.assertIn("reset database contains no reviewed stats", result["message"])
+        self.assertEqual(self.command("data")["matches"], [])
+        with closing(sqlite3.connect(result["backup"])) as backup:
+            self.assertEqual(backup.execute("SELECT COUNT(*) FROM matches").fetchone()[0], 1)
+        self.extractor.extract.assert_not_called()
+
+    def test_clean_backup_failure_does_not_reset_existing_database(self):
+        match_id = self.create_match()
+        self.connection.commit()
+
+        with patch("processing.__main__.backup_database", side_effect=OSError("Backup unavailable")):
+            with self.assertRaisesRegex(OSError, "Backup unavailable"):
+                self.command("process", "--clean")
+
+        self.assertEqual(self.connection.execute("SELECT id FROM matches").fetchone()[0], match_id)
+        self.extractor.extract.assert_not_called()
+
+    def test_clean_rejects_partial_scans_before_resetting_database(self):
+        match_id = self.create_match()
+        self.connection.commit()
+
+        for arguments in (("--limit", "1"), ("--limit", "0"), ("--screenshots", "73")):
+            with self.subTest(arguments=arguments):
+                with self.assertRaisesRegex(ValueError, "--clean cannot be combined"):
+                    self.command("process", "--clean", *arguments)
+                self.assertEqual(self.connection.execute("SELECT id FROM matches").fetchone()[0], match_id)
+        self.assertFalse((self.root / "backups").exists())
+        self.extractor.extract.assert_not_called()
+
+    def test_clean_preserves_committed_wal_records_in_backup(self):
+        self.assertEqual(self.connection.execute("PRAGMA journal_mode = WAL").fetchone()[0], "wal")
+        match_id = self.create_match()
+        self.connection.commit()
+        self.assertGreater((self.root / "career.sqlite-wal").stat().st_size, 0)
+
+        result = self.command("process", "--clean")
+
+        with closing(sqlite3.connect(result["backup"])) as backup:
+            self.assertEqual(backup.execute("SELECT id FROM matches").fetchone()[0], match_id)
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM matches").fetchone()[0], 0)
+        self.assertEqual(self.command("data")["matches"], [])
 
     def test_delete_and_replace_screenshot_never_loses_saved_stats(self):
         original = self.create_image()

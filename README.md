@@ -74,6 +74,32 @@ Approval saves the stats in one SQLite transaction. Click Reload in the
 dashboard to see them. Existing reviewed data is preserved; intentional
 corrections require `--replace-reviewed`.
 
+## Rebuild From Scratch
+
+```sh
+./run process --clean
+```
+
+This backs up the existing database to a unique file under
+`processing/data/backups/`, verifies that backup, resets the active database to
+a fresh schema, and runs OCR on every distinct image currently in
+`raw_screenshots/`. The backup path is printed before the reset. If the backup
+fails, the existing database is not reset. If no database exists, one is created
+without a backup.
+
+**This clears saved stats, approvals, manual corrections, and processing history
+from the active database.** Only screenshots still present can be processed
+again; deleted originals cannot be reconstructed. With an empty screenshot
+folder, the rebuilt database has no stats. New OCR results must be reviewed and
+approved again before they appear in the dashboard.
+
+Original images, existing backups, and old review files are not deleted. Use the
+new review file after a reset because record IDs are regenerated. `--clean`
+cannot be combined with `--limit` or `--screenshots`; it is a full rebuild. After
+an interruption, resume with plain `./run process` to keep completed work.
+For an OCR refresh that keeps reviewed stats, use `./run process --reextract`
+instead.
+
 ## Delete Old Screenshots
 
 You can delete old images after checking their results. **Deleting screenshots
@@ -82,7 +108,7 @@ content hash in the local database, not by the highest filename number:
 
 - A new image reusing an old filename is processed.
 - The same image renamed or copied is not processed twice.
-- An empty screenshot folder does not clear the database.
+- An empty screenshot folder does not clear the database unless you use `--clean`.
 - The website does not need screenshots to display saved stats.
 
 Keep `processing/data/career.sqlite`: it contains the stats, review history, and
