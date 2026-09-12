@@ -43,6 +43,7 @@ export interface Performance extends Entity {
 	overall: number | null;
 	displayed_position: string | null;
 	goals: number | null;
+	goals_assumed_zero?: boolean;
 	assists: number | null;
 	minutes_played: number | null;
 	goals_conceded: number | null;
@@ -65,6 +66,7 @@ export interface MetricComparison {
 	result: string;
 	difference: number | null;
 	missing_match_values: number;
+	assumed_zero_match_values?: number;
 	raw_match_average?: number | null;
 	display_rule?: string;
 }
@@ -260,9 +262,20 @@ export function selectPerformances(
 			(clubId === null || row.club_id === clubId),
 	);
 }
-export function metric(rows: Row[], field: string) {
+export function metric(rows: Row[], field: string | readonly string[]) {
+	const fields = typeof field === "string" ? [field] : field;
 	const values = rows
-		.map((row) => row[field])
+		.map((row) => {
+			if (!fields.length) return null;
+			let total = 0;
+			for (const component of fields) {
+				const value = row[component];
+				if (typeof value !== "number" || !Number.isFinite(value))
+					return null;
+				total += value;
+			}
+			return total;
+		})
 		.filter(
 			(value): value is number =>
 				typeof value === "number" && Number.isFinite(value),
@@ -464,3 +477,49 @@ export const performanceGroups: Record<string, string[]> = {
 		"balls_stripped",
 	],
 };
+
+const completedPassFields = [
+	"passes_completed_short",
+	"passes_completed_medium",
+	"passes_completed_long",
+];
+const failedPassFields = [
+	"passes_failed_short",
+	"passes_failed_medium",
+	"passes_failed_long",
+];
+const combinedPerformanceFields: Record<string, string[]> = {
+	passes_completed: completedPassFields,
+	passes_failed: failedPassFields,
+	passes_attempted: [...completedPassFields, ...failedPassFields],
+};
+
+export function performanceMetric(rows: Row[], field: string) {
+	return metric(rows, combinedPerformanceFields[field] ?? field);
+}
+
+export const seasonStatGroups: Record<string, string[]> = Object.fromEntries(
+	Object.entries(performanceGroups)
+		.filter(([group]) => group !== "Match record")
+		.map(([group, fields]) => {
+			const counts = fields.filter(
+				(field) =>
+					!field.endsWith("_pct") &&
+					!field.endsWith("_basis") &&
+					field !== "goals_conceded_displayed" &&
+					field !== "key_passes",
+			);
+			return [
+				group,
+				group === "Passing"
+					? [
+							"passes_completed",
+							"passes_attempted",
+							"passes_failed",
+							"key_passes",
+							...counts,
+						]
+					: counts,
+			];
+		}),
+);

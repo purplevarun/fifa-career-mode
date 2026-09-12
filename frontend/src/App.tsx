@@ -63,9 +63,9 @@ function Shell({
 		preseason: parameters.get("preseason") !== "false",
 	};
 	const matches = selectMatches(model, filters);
-	const archiveWide = ["/career", "/audit", "/data"].includes(
-		location.pathname,
-	);
+	const archiveWide =
+		["/audit", "/data"].includes(location.pathname) ||
+		(location.pathname === "/career" && parameters.get("tab") !== "events");
 	const navigation = [
 		{ path: "/", label: "Overview", icon: ChartNoAxesCombined },
 		{ path: "/matches", label: "Matches", icon: CalendarDays },

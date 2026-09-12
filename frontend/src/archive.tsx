@@ -15,7 +15,9 @@ import {
 	display,
 	downloadJson,
 	label,
+	performanceMetric,
 	referenceLabel,
+	selectPerformances,
 } from "./data";
 import type { Column } from "./ui";
 import {
@@ -32,9 +34,64 @@ import {
 } from "./ui";
 
 export function CareerRecords() {
-	const { model } = useCareer();
-	const [tab, setTab] = useState("transfers"),
-		[selected, setSelected] = useState<Row | null>(null);
+	const { model, filters } = useCareer();
+	const [parameters, setParameters] = useSearchParams();
+	const tab = parameters.get("tab") === "events" ? "events" : "transfers";
+	const [selected, setSelected] = useState<Row | null>(null);
+	const [eventType, setEventType] = useState("all");
+	const events = model.data.competition_events
+		.filter((event) => {
+			const edition = model.editions.get(
+				String(event.competition_season_id),
+			);
+			return (
+				(filters.season === "all" ||
+					edition?.season_id === filters.season) &&
+				(filters.competition === "all" ||
+					edition?.competition_id === filters.competition) &&
+				(filters.preseason ||
+					!model.competitions.get(edition?.competition_id ?? "")
+						?.is_preseason)
+			);
+		})
+		.sort((left, right) =>
+			String(right.period ?? right.announced_on ?? "").localeCompare(
+				String(left.period ?? left.announced_on ?? ""),
+			),
+		);
+	const monthly = events.filter(
+		(event) => event.event_type === "player_of_the_month",
+	);
+	const awardCounts = new Map<
+		string,
+		{
+			id: string;
+			player_id: string;
+			name: string;
+			season: string;
+			awards: number;
+		}
+	>();
+	for (const event of monthly) {
+		if (typeof event.player_id !== "string") continue;
+		const edition = model.editions.get(String(event.competition_season_id));
+		const season =
+			model.seasons.get(edition?.season_id ?? "")?.label ??
+			"Unknown season";
+		const id = `${event.player_id}:${season}`;
+		const current = awardCounts.get(id) ?? {
+			id,
+			player_id: event.player_id,
+			name: model.players.get(event.player_id)?.name ?? "Unknown player",
+			season,
+			awards: 0,
+		};
+		current.awards += 1;
+		awardCounts.set(id, current);
+	}
+	const visibleEvents = events.filter(
+		(event) => eventType === "all" || event.event_type === eventType,
+	);
 	return (
 		<>
 			<PageHeading title="Career records" eyebrow="Transfers & honours" />
@@ -49,11 +106,20 @@ export function CareerRecords() {
 						role="tab"
 						aria-selected={tab === value}
 						className={tab === value ? "active" : ""}
-						onClick={() => setTab(value)}
+						onClick={() =>
+							setParameters(
+								(current) => {
+									const next = new URLSearchParams(current);
+									next.set("tab", value);
+									return next;
+								},
+								{ replace: true },
+							)
+						}
 					>
 						{value === "transfers"
 							? `Transfers (${model.data.player_transfers.length})`
-							: `Honours & events (${model.data.competition_events.length})`}
+							: `Honours & events (${events.length})`}
 					</button>
 				))}
 			</div>
@@ -77,7 +143,7 @@ export function CareerRecords() {
 									</Pill>
 									<span className="muted tiny">
 										{typeof transfer.effective_on ===
-											"string"
+										"string"
 											? dateLabel(transfer.effective_on)
 											: "Exact transfer date not recorded"}
 									</span>
@@ -96,14 +162,14 @@ export function CareerRecords() {
 								<p>
 									{transfer.from_club_id
 										? model.clubs.get(
-											String(transfer.from_club_id),
-										)?.name
+												String(transfer.from_club_id),
+											)?.name
 										: "Origin not recorded"}{" "}
 									<ArrowRight size={14} />{" "}
 									{transfer.to_club_id
 										? model.clubs.get(
-											String(transfer.to_club_id),
-										)?.name
+												String(transfer.to_club_id),
+											)?.name
 										: "Destination not recorded"}
 								</p>
 								<dl className="inline-facts">
@@ -145,47 +211,131 @@ export function CareerRecords() {
 					))}
 				</div>
 			) : (
-				<div className="event-list">
-					{model.data.competition_events.map((event) => (
-						<article className="event-record" key={event.id}>
-							<div className="event-date">
-								{typeof event.announced_on === "string"
-									? dateLabel(event.announced_on)
-									: "Date not recorded"}
-							</div>
-							<Trophy size={24} className="event-icon" />
-							<div>
-								<div className="eyebrow">
-									{referenceLabel(
-										model,
-										"competition_season_id",
-										event.competition_season_id,
+				<>
+					{monthly.length > 0 && (
+						<>
+							<SectionHeading title="Player of the Month">
+								<Pill>{monthly.length} awards</Pill>
+							</SectionHeading>
+							<DataTable
+								rows={[...awardCounts.values()]}
+								rowKey={(row) => row.id}
+								searchLabel="Search monthly award winners"
+								searchText={(row) =>
+									`${row.name} ${row.season}`
+								}
+								defaultSort={{ key: "awards", desc: true }}
+								exportName="player-of-the-month.json"
+								columns={[
+									{
+										key: "name",
+										title: "Player",
+										render: (row) => (
+											<CareerLink
+												to={`/players/${row.player_id}`}
+											>
+												{row.name}
+											</CareerLink>
+										),
+									},
+									{ key: "season", title: "Season" },
+									{
+										key: "awards",
+										title: "Awards",
+										numeric: true,
+									},
+								]}
+							/>
+						</>
+					)}
+					<SectionHeading title="Honours & events">
+						<select
+							aria-label="Honour type"
+							value={eventType}
+							onChange={(event) =>
+								setEventType(event.target.value)
+							}
+						>
+							<option value="all">All honours & events</option>
+							{[
+								...new Set(
+									events.map((event) =>
+										String(event.event_type),
+									),
+								),
+							]
+								.sort()
+								.map((type) => (
+									<option key={type} value={type}>
+										{label(type)}
+									</option>
+								))}
+						</select>
+					</SectionHeading>
+					{visibleEvents.length === 0 && (
+						<Empty title="No honours in this selection" />
+					)}
+					<div className="event-list">
+						{visibleEvents.map((event) => (
+							<article className="event-record" key={event.id}>
+								<div className="event-date">
+									{typeof event.period === "string"
+										? /^\d{4}-\d{2}$/.test(event.period)
+											? new Date(
+													`${event.period}-01T12:00:00`,
+												).toLocaleDateString("en-GB", {
+													month: "long",
+													year: "numeric",
+												})
+											: event.period
+										: typeof event.announced_on === "string"
+											? dateLabel(event.announced_on)
+											: "Date not recorded"}
+									{typeof event.announced_on === "string" && (
+										<small className="muted">
+											Announced{" "}
+											{dateLabel(
+												event.announced_on,
+												true,
+											)}
+										</small>
 									)}
 								</div>
-								<h2>{label(String(event.event_type))}</h2>
-								<p>{String(event.description)}</p>
-								{typeof event.player_id === "string" && (
-									<CareerLink
-										to={`/players/${event.player_id}`}
-										className="small-link"
-									>
-										{
-											model.players.get(event.player_id)
-												?.name
-										}{" "}
-										<ArrowRight size={14} />
-									</CareerLink>
-								)}
-							</div>
-							<button
-								className="button secondary"
-								onClick={() => setSelected(event)}
-							>
-								Full record
-							</button>
-						</article>
-					))}
-				</div>
+								<Trophy size={24} className="event-icon" />
+								<div>
+									<div className="eyebrow">
+										{referenceLabel(
+											model,
+											"competition_season_id",
+											event.competition_season_id,
+										)}
+									</div>
+									<h2>{label(String(event.event_type))}</h2>
+									<p>{String(event.description)}</p>
+									{typeof event.player_id === "string" && (
+										<CareerLink
+											to={`/players/${event.player_id}`}
+											className="small-link"
+										>
+											{
+												model.players.get(
+													event.player_id,
+												)?.name
+											}{" "}
+											<ArrowRight size={14} />
+										</CareerLink>
+									)}
+								</div>
+								<button
+									className="button secondary"
+									onClick={() => setSelected(event)}
+								>
+									Full record
+								</button>
+							</article>
+						))}
+					</div>
+				</>
 			)}
 			{selected && (
 				<Modal title="Career record" onClose={() => setSelected(null)}>
@@ -207,7 +357,7 @@ function MetricPair({
 	return (
 		<span
 			className={`metric-pair ${metric.result === "match" ? "positive-text" : metric.result === "mismatch" ? "negative-text" : "muted"}`}
-			title={`${label(metric.result)}${metric.missing_match_values ? `; ${metric.missing_match_values} missing match values` : ""}${metric.raw_match_average != null ? `; raw mean ${metric.raw_match_average.toFixed(6)}` : ""}`}
+			title={`${label(metric.result)}${metric.assumed_zero_match_values ? `; ${metric.assumed_zero_match_values} goalkeeper goal values assumed zero` : ""}${metric.missing_match_values ? `; ${metric.missing_match_values} missing match values` : ""}${metric.raw_match_average != null ? `; raw mean ${metric.raw_match_average.toFixed(6)}` : ""}`}
 		>
 			{display(metric.observed, digits)}{" "}
 			<span className="divider">/</span> {display(metric.derived, digits)}
@@ -228,6 +378,13 @@ export function Audit() {
 	);
 	const warnings = model.data.match_coverage.warnings;
 	const coverage = model.data.match_coverage.summary;
+	const appearances = selectPerformances(model, model.matches);
+	const passing = performanceMetric(appearances, "passes_completed");
+	const keyPasses = performanceMetric(appearances, "key_passes");
+	const interceptions = performanceMetric(appearances, "interceptions");
+	const detailedComplete = [passing, keyPasses, interceptions].every(
+		(value) => value.known === value.total,
+	);
 	const columns: Column<Comparison>[] = [
 		{
 			key: "player",
@@ -399,7 +556,7 @@ export function Audit() {
 					<div className="note-strip">
 						<span>Rating display: one-decimal truncation.</span>
 						<span>
-							Goalkeeper scoring: nine comparisons unavailable.
+							Goalkeeper goals: missing values assumed zero.
 						</span>
 						<span>Zero-appearance averages: not applicable.</span>
 					</div>
@@ -429,20 +586,30 @@ export function Audit() {
 									All fixtures, team tables & player cores
 								</strong>
 								<p>
-									85 matches / 10 preseason / 1,131 Notts
+									{display(coverage.matches)} matches /{" "}
+									{display(coverage.preseason_matches)}{" "}
+									preseason /{" "}
+									{display(coverage.player_records)} Notts
 									County appearances
 								</p>
 							</div>
 						</div>
-						<div className="notice warning">
-							<TriangleAlert size={18} />
+						<div
+							className={`notice ${detailedComplete ? "positive" : "warning"}`}
+						>
+							{detailedComplete ? (
+								<Check size={18} />
+							) : (
+								<TriangleAlert size={18} />
+							)}
 							<div>
-								<strong>
-									Detailed player fields remain partial
-								</strong>
+								<strong>Passing and interceptions</strong>
 								<p>
-									Passing, defending, movement, opening squad
-									records and some career events.
+									{passing.known}/{passing.total} passing
+									records / {keyPasses.known}/
+									{keyPasses.total} key-pass records /{" "}
+									{interceptions.known}/{interceptions.total}{" "}
+									interception records
 								</p>
 							</div>
 						</div>

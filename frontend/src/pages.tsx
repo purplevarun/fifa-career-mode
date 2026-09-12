@@ -7,7 +7,7 @@ import {
 	Trophy,
 } from "lucide-react";
 import { useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { RankingChart, TrendChart } from "./charts";
 import { useCareer } from "./context";
 import type { Match, Performance, Row } from "./data";
@@ -16,7 +16,9 @@ import {
 	display,
 	label,
 	performanceGroups,
+	performanceMetric,
 	playerSummary,
+	seasonStatGroups,
 	selectMatches,
 	snapshotOrder,
 	summarize,
@@ -393,9 +395,12 @@ export function PerformanceDialog({
 										<dt>{label(field)}</dt>
 										<dd
 											title={
-												performance[field] == null
-													? "Not recorded or not applicable"
-													: undefined
+												field === "goals" &&
+												performance.goals_assumed_zero
+													? "Missing goalkeeper goals assumed zero"
+													: performance[field] == null
+														? "Not recorded or not applicable"
+														: undefined
 											}
 										>
 											{display(
@@ -665,17 +670,31 @@ export function MatchDetail() {
 
 export function Players() {
 	const { model, matches } = useCareer();
+	const [parameters, setParameters] = useSearchParams();
+	const requestedStatistic = parameters.get("stat") ?? "summary";
+	const statistic = Object.values(seasonStatGroups)
+		.flat()
+		.includes(requestedStatistic)
+		? requestedStatistic
+		: "summary";
 	const [opposition, setOpposition] = useState(false);
 	const [position, setPosition] = useState("all");
 	const players = model.data.players
-		.map((player) =>
-			playerSummary(
+		.map((player) => {
+			const summary = playerSummary(
 				model,
 				player,
 				matches,
 				opposition ? null : model.nottsId,
-			),
-		)
+			);
+			return {
+				...summary,
+				statistic: performanceMetric(
+					summary.rows,
+					statistic === "summary" ? "goals" : statistic,
+				),
+			};
+		})
 		.filter(
 			(player) =>
 				player.appearances > 0 &&
@@ -747,6 +766,50 @@ export function Players() {
 			render: (player) => <StatValue value={player.rating} digits={2} />,
 		},
 	];
+	const statisticColumns: Column<PlayerSummary>[] = [
+		columns[0],
+		columns[1],
+		{ key: "appearances", title: "Apps", numeric: true },
+		{
+			key: "total",
+			title: label(statistic),
+			numeric: true,
+			value: (player) => player.statistic.value,
+			render: (player) => <StatValue {...player.statistic} />,
+		},
+		{
+			key: "per_recorded_app",
+			title: "Per recorded app",
+			numeric: true,
+			value: (player) =>
+				player.statistic.value === null
+					? null
+					: player.statistic.value / player.statistic.known,
+			render: (player) =>
+				display(
+					player.statistic.value === null
+						? null
+						: player.statistic.value / player.statistic.known,
+					2,
+				),
+		},
+		{
+			key: "coverage",
+			title: "Apps recorded",
+			numeric: true,
+			value: (player) => player.statistic.known / player.statistic.total,
+			render: (player) =>
+				`${player.statistic.known}/${player.statistic.total}`,
+		},
+	];
+	const known = players.reduce(
+		(total, player) => total + player.statistic.known,
+		0,
+	);
+	const total = players.reduce(
+		(total, player) => total + player.statistic.total,
+		0,
+	);
 	return (
 		<>
 			<PageHeading title="Players" eyebrow="Performance & development">
@@ -761,26 +824,73 @@ export function Players() {
 					Include opposition
 				</label>
 			</PageHeading>
+			{statistic !== "summary" && (
+				<SectionHeading title={`${label(statistic)}: recorded totals`}>
+					<Pill tone={known === total ? "positive" : "warning"}>
+						{`${known}/${total} appearances recorded`}
+					</Pill>
+				</SectionHeading>
+			)}
 			<DataTable
+				key={`${statistic}:${opposition}`}
 				rows={players}
-				columns={columns}
+				columns={statistic === "summary" ? columns : statisticColumns}
 				rowKey={(player) => player.id}
-				defaultSort={{ key: "goals", desc: true }}
+				defaultSort={{
+					key: statistic === "summary" ? "goals" : "total",
+					desc: true,
+				}}
 				searchLabel="Search player or nationality"
 				searchText={(player) =>
 					`${player.name} ${player.nationality} ${player.position}`
 				}
-				exportName="player-summary.json"
+				exportName={`player-${statistic}.json`}
 				toolbar={
-					<select
-						aria-label="Position group"
-						value={position}
-						onChange={(event) => setPosition(event.target.value)}
-					>
-						<option value="all">All positions</option>
-						<option value="outfield">Outfield</option>
-						<option value="GK">Goalkeepers</option>
-					</select>
+					<>
+						<select
+							aria-label="Player statistic"
+							value={statistic}
+							onChange={(event) => {
+								const value = event.target.value;
+								setParameters(
+									(current) => {
+										const next = new URLSearchParams(
+											current,
+										);
+										if (value === "summary")
+											next.delete("stat");
+										else next.set("stat", value);
+										return next;
+									},
+									{ replace: true },
+								);
+							}}
+						>
+							<option value="summary">Performance summary</option>
+							{Object.entries(seasonStatGroups).map(
+								([group, fields]) => (
+									<optgroup key={group} label={group}>
+										{fields.map((field) => (
+											<option key={field} value={field}>
+												{label(field)}
+											</option>
+										))}
+									</optgroup>
+								),
+							)}
+						</select>
+						<select
+							aria-label="Position group"
+							value={position}
+							onChange={(event) =>
+								setPosition(event.target.value)
+							}
+						>
+							<option value="all">All positions</option>
+							<option value="outfield">Outfield</option>
+							<option value="GK">Goalkeepers</option>
+						</select>
+					</>
 				}
 			/>
 		</>
@@ -997,7 +1107,7 @@ export function PlayerDetail() {
 										{row.observed_on
 											? dateLabel(row.observed_on)
 											: model.seasons.get(row.season_id)
-												?.label}
+													?.label}
 										<small className="muted">
 											{row.date_precision === "season"
 												? "Exact date not recorded"
@@ -1014,7 +1124,7 @@ export function PlayerDetail() {
 										tone={
 											row.snapshot_kind ===
 												"season_end" ||
-												row.snapshot_kind === "season_start"
+											row.snapshot_kind === "season_start"
 												? "positive"
 												: "neutral"
 										}
@@ -1033,6 +1143,48 @@ export function PlayerDetail() {
 			)}
 			{tab === "totals" && (
 				<>
+					<SectionHeading title="Match-derived totals">
+						<span className="tiny muted">
+							{stats.appearances} appearances
+						</span>
+					</SectionHeading>
+					<div className="detail-groups">
+						{Object.entries(seasonStatGroups)
+							.filter(
+								([group]) =>
+									group !== "Goalkeeping" ||
+									stats.rows.some(
+										(row) =>
+											row.displayed_position === "GK",
+									),
+							)
+							.map(([group, fields]) => (
+								<section key={group}>
+									<h3>{group}</h3>
+									<dl className="stats-list">
+										{fields.map((field) => {
+											const total = performanceMetric(
+												stats.rows,
+												field,
+											);
+											return (
+												<div key={field}>
+													<dt>{label(field)}</dt>
+													<dd>
+														<StatValue {...total} />
+														<span className="tiny muted">
+															{" "}
+															{total.known}/
+															{total.total} apps
+														</span>
+													</dd>
+												</div>
+											);
+										})}
+									</dl>
+								</section>
+							))}
+					</div>
 					<SectionHeading title="Captured cumulative statistics">
 						<CareerLink to="/audit" className="small-link">
 							Reconciliation <ArrowRight size={14} />
@@ -1057,12 +1209,12 @@ export function PlayerDetail() {
 											{row.scope === "all_competitions"
 												? "All competitions"
 												: model.competitions.get(
-													model.editions.get(
-														String(
-															row.competition_season_id,
-														),
-													)?.competition_id ?? "",
-												)?.name}
+														model.editions.get(
+															String(
+																row.competition_season_id,
+															),
+														)?.competition_id ?? "",
+													)?.name}
 										</strong>
 										<small className="muted">
 											{

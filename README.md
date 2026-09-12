@@ -33,6 +33,21 @@ of silently choosing another port. The dashboard reads the current SQLite
 database through a local `/api/stats` endpoint. There is no separate server to
 start and no JSON export or frontend rebuild needed when stats change.
 
+## Player Statistics and Honours
+
+On **Players**, choose a season and use **Player statistic** to rank completed
+or attempted passes, key passes, interceptions, tackles, crosses, possession,
+and other recorded counts. Totals use unique match appearances in the selected
+season and competition; the preseason toggle applies too. **Apps recorded**
+shows coverage, and missing values stay unknown rather than becoming zero.
+Passing totals combine short, medium, and long passes only when all components
+are available. Per-recorded-appearance figures exclude missing records.
+
+Each player's **Season totals** tab includes match-derived detailed totals
+separately from captured cumulative season snapshots. **Career records >
+Honours & events** shows Player of the Month counts by player and season, with
+the award month kept separate from its announcement date.
+
 ## Add Screenshots
 
 Put new images into `raw_screenshots/`, then run:

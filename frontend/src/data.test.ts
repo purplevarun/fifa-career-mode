@@ -4,6 +4,7 @@ import {
 	createModel,
 	defaultFilters,
 	metric,
+	performanceMetric,
 	selectMatches,
 	selectPerformances,
 	summarize,
@@ -59,6 +60,65 @@ describe("career data calculations", () => {
 					(row) => row.player_id === goalkeeper.id,
 				),
 				"goals",
+			).value,
+		).toBeNull();
+	});
+	it("sums passing components only for fully recorded appearances", () => {
+		const fields = [
+			"passes_completed_short",
+			"passes_completed_medium",
+			"passes_completed_long",
+		];
+		expect(
+			metric(
+				[
+					{
+						passes_completed_short: 5,
+						passes_completed_medium: 4,
+						passes_completed_long: 1,
+					},
+					{
+						passes_completed_short: 4,
+						passes_completed_medium: null,
+						passes_completed_long: 1,
+					},
+					{
+						passes_completed_short: 0,
+						passes_completed_medium: 0,
+						passes_completed_long: 0,
+					},
+					{},
+				],
+				fields,
+			),
+		).toEqual({ value: 10, known: 2, total: 4 });
+		expect(metric([], fields)).toEqual({ value: null, known: 0, total: 0 });
+		expect(
+			metric([{ passes_completed_short: Number.NaN }], fields).value,
+		).toBeNull();
+	});
+	it("distinguishes attempted and completed passes without summing percentages", () => {
+		const rows = [
+			{
+				passes_completed_short: 5,
+				passes_completed_medium: 4,
+				passes_completed_long: 1,
+				passes_failed_short: 2,
+				passes_failed_medium: 1,
+				passes_failed_long: 0,
+				key_passes: 2,
+				interceptions: 3,
+			},
+		];
+		expect(performanceMetric(rows, "passes_completed").value).toBe(10);
+		expect(performanceMetric(rows, "passes_attempted").value).toBe(13);
+		expect(performanceMetric(rows, "passes_failed").value).toBe(3);
+		expect(performanceMetric(rows, "key_passes").value).toBe(2);
+		expect(performanceMetric(rows, "interceptions").value).toBe(3);
+		expect(
+			performanceMetric(
+				[{ ...rows[0], passes_failed_long: null }],
+				"passes_attempted",
 			).value,
 		).toBeNull();
 	});
