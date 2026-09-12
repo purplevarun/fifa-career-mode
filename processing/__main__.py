@@ -7,7 +7,7 @@ from pathlib import Path
 
 from .database import connect, coverage_report, inventory, json_text, status, validate_database
 from .identifiers import new_id
-from .pipeline import approve_review, backup_database, dashboard_data, extract_pending, make_review, parse_sequences, write_json
+from .pipeline import approve_review, backup_database, dashboard_data, extract_pending, import_pending, make_review, parse_sequences, write_json
 from .reconciliation import reconcile_totals
 
 
@@ -28,11 +28,11 @@ def main(argv=None):
     reconciliation.add_argument("--club", default="Notts County")
     reconciliation.add_argument("--rating-decimals", type=int, choices=(1, 2), default=1)
     reconciliation.add_argument("--output", type=Path)
-    importer = commands.add_parser("process", aliases=["import"], help="Scan raw_screenshots and save new OCR results to SQLite")
+    importer = commands.add_parser("process", aliases=["import"], help="Scan raw_screenshots and automatically update saved dashboard stats")
     importer.add_argument("--screenshots", help="Numeric selection, for example 73,76,808-810")
     importer.add_argument("--limit", type=int, help="Optional maximum images to OCR; default processes all new images")
     importer.add_argument("--clean", action="store_true", help="Back up and reset SQLite, then OCR all current screenshots; clears reviewed stats")
-    importer.add_argument("--reextract", action="store_true", help="Refresh OCR candidates without changing reviewed records")
+    importer.add_argument("--reextract", action="store_true", help="Refresh OCR and fill missing stats without replacing saved values")
     reviewer = commands.add_parser("review", help="Write an editable review document; never overwrites an existing file")
     reviewer.add_argument("--screenshots", help="Optional numeric screenshot selection")
     reviewer.add_argument("--match", help="Propose an approved match UUID for the selected performance records")
@@ -100,19 +100,17 @@ def main(argv=None):
             return 1 if errors else 0
         elif arguments.command in {"process", "import"}:
             manifest = inventory(connection, root)
-            results = extract_pending(connection, root, parse_sequences(arguments.screenshots), arguments.limit,
+            sequences = parse_sequences(arguments.screenshots)
+            results = extract_pending(connection, root, sequences, arguments.limit,
                                       arguments.reextract, progress=lambda message: print(message, flush=True))
             source_ids = results.pop("processed_source_ids")
-            result = {"database": str(database_path), "inventory": manifest, "extraction": results, **reset}
-            if source_ids:
-                review = make_review(connection, source_ids=set(source_ids))
-                review_path = database_path.parent / "reviews" / f"review-{new_id()}.json"
-                write_json(review_path, review, overwrite=False)
-                result["review_file"] = str(review_path)
-                result["next"] = "Check the new OCR values against the originals, then run python3 -m processing approve <review_file> --note 'Checked'."
+            imported = import_pending(connection, sequences, source_ids)
+            result = {"database": str(database_path), "inventory": manifest, "extraction": results, "import": imported, **reset}
+            if imported["imported_sources"]:
+                result["message"] = "Stats saved to SQLite automatically. Reload the local dashboard to see the changes."
             else:
-                result["message"] = ("No OCR results were saved. The reset database contains no reviewed stats."
-                                     if arguments.clean else "No new OCR results. Saved stats are unchanged.")
+                result["message"] = ("The reset database contains no saved stats; see extraction errors and skipped sources."
+                                     if arguments.clean else "No new stats saved. Existing stats are unchanged; see skipped sources for any unreadable or incomplete records.")
             print(json_text(result), end="")
             return 1 if results["errors"] else 0
         elif arguments.command == "review":

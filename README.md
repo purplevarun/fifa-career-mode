@@ -56,12 +56,16 @@ Put new images into `raw_screenshots/`, then run:
 ./run process
 ```
 
-This inventories images, skips previously extracted content, and saves new OCR
-results in SQLite. Interrupted work resumes by rerunning the same command. Use
-`--limit 20` to process a smaller batch or `--reextract` to refresh OCR candidates.
-Neither option overwrites reviewed stats.
+This inventories images, skips previously extracted content, and automatically
+saves valid OCR results as dashboard statistics in SQLite. It also imports cached
+results left pending by older processing runs. **No review or approval step is
+required.** Click Reload in the dashboard after processing.
 
-OCR now proposes:
+Interrupted work resumes by rerunning the same command. Use `--limit 20` to OCR
+a smaller batch or `--reextract` to refresh OCR and fill missing stats. Neither
+option replaces existing non-null stats or saved corrections.
+
+Supported screens include:
 
 - Match/team stats, player performances, selected-player profiles and season totals.
 - Completed transfers and loans, weekly wages, contract lengths and loan lengths.
@@ -70,24 +74,25 @@ OCR now proposes:
 Offers still in negotiation and award shortlists are not treated as completed
 signings or wins. Missing years, selling clubs, fees and competition context stay
 unknown. Contract offers are not mistaken for transfer fees. News surnames are
-matched to existing players only when unambiguous and still require review.
+matched to existing players only when unambiguous.
 
 Previously scanned transfer/news/winner screens and award-bearing dashboards are
-retried once when their OCR version changes. New review files preserve reviewed values while proposing newly
-read fields and additional events; the saved stats are not changed by extraction.
+retried once when their OCR version changes. Newly read fields and additional
+events are imported without replacing saved values. Previously recorded player
+and club name corrections are reused when the OCR spelling maps unambiguously
+to an existing identity.
 
-OCR can misread numbers or associate a player with the wrong match. New results
-therefore produce an editable review file under `processing/data/reviews/`.
-Check those values against the originals, supply missing match/season context,
-and approve the file shown by the processor:
+Player and goalkeeper screenshots are linked to the preceding match summary in
+numeric screenshot order. An unrelated or unrecognized screen breaks that
+context, so a player is never automatically attached across it. Goalkeeper
+counts that include penalties are separated from the recorded shootout score.
 
-```sh
-python3 -m processing approve processing/data/reviews/<review-file>.json --note "Checked against originals"
-```
-
-Approval saves the stats in one SQLite transaction. Click Reload in the
-dashboard to see them. Existing reviewed data is preserved; intentional
-corrections require `--replace-reviewed`.
+Each source is validated and saved in its own transaction. Unsupported screens,
+missing required context, and conflicting records are reported under
+`import.skipped_sources`; they do not block other valid screenshots. Their OCR
+results remain available for later processing. Automatically imported values
+are not manually verified, so OCR mistakes that pass validation can still occur.
+Existing saved stats and their identifiers are preserved.
 
 ## Rebuild From Scratch
 
@@ -97,19 +102,19 @@ corrections require `--replace-reviewed`.
 
 This backs up the existing database to a unique file under
 `processing/data/backups/`, verifies that backup, resets the active database to
-a fresh schema, and runs OCR on every distinct image currently in
-`raw_screenshots/`. The backup path is printed before the reset. If the backup
+a fresh schema, and rebuilds statistics automatically from every distinct image
+currently in `raw_screenshots/`. The backup path is printed before the reset. If the backup
 fails, the existing database is not reset. If no database exists, one is created
 without a backup.
 
 **This clears saved stats, approvals, manual corrections, and processing history
 from the active database.** Only screenshots still present can be processed
 again; deleted originals cannot be reconstructed. With an empty screenshot
-folder, the rebuilt database has no stats. New OCR results must be reviewed and
-approved again before they appear in the dashboard.
+folder, the rebuilt database has no stats. Valid new OCR results are saved
+automatically; no approval step follows the rebuild.
 
-Original images, existing backups, and old review files are not deleted. Use the
-new review file after a reset because record IDs are regenerated. `--clean`
+Original images, existing backups, and old review files are not deleted. Record
+IDs are regenerated, so old review files must not be replayed after a reset. `--clean`
 cannot be combined with `--limit` or `--screenshots`; it is a full rebuild. After
 an interruption, resume with plain `./run process` to keep completed work.
 For an OCR refresh that keeps reviewed stats, use `./run process --reextract`
@@ -134,6 +139,10 @@ make another permanent copy of your images or delete them automatically.
 
 Backups, review tools, and developer checks are available directly through
 Python and npm; they are not additional `./run` commands.
+
+`review` and `approve` remain optional maintenance tools for intentional manual
+corrections, not requirements for processing. Replacing existing values through
+those tools still requires `--replace-reviewed`.
 
 ```sh
 python3 -m processing status

@@ -493,6 +493,102 @@ def approve_review(connection, document, note, replace_reviewed=False):
     return counts
 
 
+def learn_ocr_aliases(connection):
+    fields = {"player": ("player_aliases", "player_id"),
+              **{field: ("club_aliases", "club_id") for field in ("club", "home_club", "away_club", "from_club", "to_club")}}
+    aliases = {}
+    for row in connection.execute(
+        "SELECT extractions.candidate_json, reviews.payload_json FROM extractions JOIN reviews USING (source_id) "
+        "WHERE reviews.revision = (SELECT MAX(previous.revision) FROM reviews AS previous WHERE previous.source_id = reviews.source_id)"
+    ):
+        candidates = json.loads(row["candidate_json"])
+        saved = json.loads(row["payload_json"])["records"]
+        if len(candidates) != 1 or len(saved) != 1 or candidates[0].get("type") != saved[0].get("type"):
+            continue
+        for field, (table, identifier) in fields.items():
+            candidate_name, saved_name = candidates[0].get(field), saved[0].get(field)
+            if not isinstance(candidate_name, str) or not candidate_name.strip() or not isinstance(saved_name, str) or not saved_name.strip():
+                continue
+            alias, canonical = normalized_name(candidate_name).casefold(), normalized_name(saved_name).casefold()
+            if alias == canonical:
+                continue
+            existing = connection.execute(f"SELECT {identifier} FROM {table} WHERE alias = ?", (canonical,)).fetchone()
+            if existing:
+                aliases.setdefault((table, identifier, alias), set()).add(existing[0])
+    with connection:
+        for (table, identifier, alias), matches in aliases.items():
+            if len(matches) == 1:
+                connection.execute(f"INSERT OR IGNORE INTO {table}(alias, {identifier}) VALUES (?, ?)", (alias, next(iter(matches))))
+
+
+def normalize_goalkeeper(connection, record):
+    if record.get("goals_conceded_basis"):
+        return
+    displayed = record.get("goals_conceded_displayed")
+    if displayed is None:
+        displayed = record.get("goals_conceded")
+    if displayed is None:
+        return
+    fixture = confirmed_match(connection, record)
+    club = connection.execute("SELECT club_id FROM club_aliases WHERE alias = ?", (normalized_name(record.get("club")).casefold(),)).fetchone()
+    if club is None or club[0] not in {fixture["home_club_id"], fixture["away_club_id"]}:
+        raise ValueError("Goalkeeper club does not match either side of the fixture")
+    opponent_side = "away" if club[0] == fixture["home_club_id"] else "home"
+    penalties, goals = fixture[f"{opponent_side}_penalties"], fixture[f"{opponent_side}_goals"]
+    record["goals_conceded_displayed"] = displayed
+    if penalties is None:
+        record["goals_conceded_basis"] = "Displayed goalkeeper count; this match had no penalty shootout."
+    elif goals is not None and displayed == goals + penalties:
+        record["goals_conceded"] = goals
+        record["goals_conceded_basis"] = "Displayed goalkeeper count includes opponent shootout goals; subtract the separately recorded shootout score."
+    elif displayed == goals:
+        record["goals_conceded_basis"] = "Displayed count agrees with the opponent's score before the shootout."
+    else:
+        raise ValueError("Ambiguous shootout-inclusive goalkeeper count")
+
+
+def import_pending(connection, sequences=None, refreshed_source_ids=None):
+    learn_ocr_aliases(connection)
+    sources = select_sources(connection)
+    selected = {source["id"] for source in select_sources(connection, sequences)}
+    refreshed = set(refreshed_source_ids or ())
+    pending = {source["id"] for source in sources if source["id"] in selected
+               and (source["status"] == "needs_review" or source["id"] in refreshed)}
+    documents = {source["source_id"]: source for source in make_review(connection, source_ids=pending)["sources"]}
+    counts = {"imported_sources": 0, "imported_records": 0, "unchanged_sources": 0, "skipped_sources": []}
+    current_match_id = None
+    for source in sources:
+        screen_type = source["screen_type"]
+        if screen_type not in {"player_performance", "goalkeeper_performance"} or source["sequence"] is None:
+            current_match_id = None
+        document = documents.get(source["id"])
+        if document is not None:
+            try:
+                if not document["records"]:
+                    raise ValueError(f"No supported statistics detected on {screen_type} screen")
+                for record in document["records"]:
+                    if record.get("type") == "player_match" and not record.get("match_id") and not record.get("match_source_id"):
+                        if current_match_id is None:
+                            raise ValueError("No unambiguous preceding match summary for this player screenshot")
+                        record["match_id"] = current_match_id
+                    if screen_type == "goalkeeper_performance" and record.get("type") == "player_match":
+                        normalize_goalkeeper(connection, record)
+                document["complete"] = True
+                result = approve_review(connection, {"schema_version": SCHEMA_VERSION, "sources": [document]},
+                                        "Automatically imported by process; OCR values were not manually verified.")
+                counts["imported_sources"] += result["approved_sources"]
+                counts["imported_records"] += result["reviewed_records"]
+                counts["unchanged_sources"] += result["skipped_reviews"]
+            except (ValueError, sqlite3.IntegrityError) as exception:
+                with connection:
+                    connection.execute("UPDATE source_images SET error = ? WHERE id = ?", (str(exception), source["id"]))
+                counts["skipped_sources"].append({"path": source["path"], "reason": str(exception)})
+        if screen_type == "match_facts" and source["sequence"] is not None:
+            matches = connection.execute("SELECT match_id FROM match_sources WHERE source_id = ?", (source["id"],)).fetchall()
+            current_match_id = matches[0]["match_id"] if len(matches) == 1 else None
+    return counts
+
+
 def write_json(path, value, overwrite=True):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)

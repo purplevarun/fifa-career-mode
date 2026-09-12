@@ -11,7 +11,7 @@ Usage: ./run <start|process> [args...]
 
 Commands:
   start        Start the local dashboard at http://127.0.0.1:5000
-  process      Scan raw_screenshots/ and save new OCR results to local SQLite
+  process      Scan raw_screenshots/ and automatically update dashboard stats
 EOF
 }
 

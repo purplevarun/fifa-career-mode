@@ -15,7 +15,7 @@ from PIL import Image
 
 from processing import EXTRACTOR_VERSION
 from processing.database import connect, coverage_report, insert_entity, inventory, status, validate_database
-from processing.pipeline import approve_review, backup_database, dashboard_data, ensure_club, ensure_edition, ensure_season, export_data, extract_pending, make_review
+from processing.pipeline import approve_review, backup_database, dashboard_data, ensure_club, ensure_edition, ensure_season, export_data, extract_pending, import_pending, make_review
 from processing.batch_review import fixture_contexts, prepare_player_cores
 from processing.identifiers import is_uuid, new_id
 from processing.extraction import parse_news_event
@@ -643,6 +643,142 @@ class ImportTests(DatabaseTestCase):
         self.assertIn("missing_match_score", [warning["code"] for warning in report["warnings"]])
 
 
+class AutomaticImportTests(DatabaseTestCase):
+    def setUp(self):
+        super().setUp()
+        self.match = {
+            "type": "match", "season": "2018/19", "competition": "European International Cup",
+            "played_on": "2018-07-04", "home_club": "Notts County", "away_club": "Dundee FC",
+            "home_goals": 1, "away_goals": 1,
+        }
+        self.player = {
+            "type": "player_match", "player": "Harry Kewell", "club": "Notts County",
+            "match_id": None, "rating": 7.5, "goals": 1, "assists": 0,
+        }
+
+    def extract(self, *screens):
+        for index in range(len(screens)):
+            self.create_image(f"Screenshot ({73 + index}).png", color=(index * 20, 0, 0))
+        inventory(self.connection, self.root)
+        extractor = Mock()
+        extractor.extract.side_effect = [
+            {"screen_type": screen_type, "records": records, "evidence": {}, "issues": []}
+            for screen_type, records in screens
+        ]
+        extract_pending(self.connection, self.root, extractor=extractor)
+
+    def test_cached_candidates_import_and_link_once(self):
+        self.extract(("match_facts", [self.match]), ("player_performance", [self.player]))
+
+        result = import_pending(self.connection)
+
+        self.assertEqual(result["imported_sources"], 2)
+        self.assertEqual(result["imported_records"], 2)
+        self.assertEqual(result["skipped_sources"], [])
+        match_id = self.connection.execute("SELECT id FROM matches").fetchone()[0]
+        self.assertEqual(self.connection.execute("SELECT match_id FROM player_matches").fetchone()[0], match_id)
+        self.assertEqual(status(self.connection)["source_states"], {"imported": 2})
+        self.assertEqual(import_pending(self.connection)["imported_sources"], 0)
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM reviews").fetchone()[0], 2)
+        self.assertEqual(validate_database(self.connection), [])
+
+    def test_interrupted_context_does_not_block_later_match(self):
+        self.extract(("match_facts", [self.match]), ("dashboard", []), ("player_performance", [self.player]),
+                     ("match_facts", [{**self.match, "played_on": "2018-07-05"}]), ("player_performance", [self.player]))
+
+        result = import_pending(self.connection)
+
+        self.assertEqual(result["imported_sources"], 3)
+        self.assertEqual(len(result["skipped_sources"]), 2)
+        self.assertIn("No unambiguous preceding match", result["skipped_sources"][1]["reason"])
+        appearance = self.connection.execute(
+            "SELECT played_on FROM matches JOIN player_matches ON player_matches.match_id = matches.id",
+        ).fetchall()
+        self.assertEqual([row[0] for row in appearance], ["2018-07-05"])
+
+    def test_invalid_match_cannot_reuse_previous_fixture(self):
+        self.extract(("match_facts", [self.match]), ("match_facts", [{**self.match, "played_on": None}]),
+                     ("player_performance", [self.player]))
+
+        result = import_pending(self.connection)
+
+        self.assertEqual(result["imported_sources"], 1)
+        self.assertEqual(len(result["skipped_sources"]), 2)
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM player_matches").fetchone()[0], 0)
+        self.assertEqual(validate_database(self.connection), [])
+
+    def test_selection_uses_existing_header_outside_selection(self):
+        self.extract(("match_facts", [self.match]), ("player_performance", [self.player]))
+        self.assertEqual(import_pending(self.connection, {73})["imported_sources"], 1)
+
+        result = import_pending(self.connection, {74})
+
+        self.assertEqual(result["imported_sources"], 1)
+        self.assertEqual(result["skipped_sources"], [])
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM player_matches").fetchone()[0], 1)
+
+    def test_refresh_preserves_saved_values(self):
+        self.extract(("match_facts", [self.match]), ("player_performance", [self.player]))
+        import_pending(self.connection)
+        source_id = self.connection.execute("SELECT source_id FROM source_paths WHERE sequence = 74").fetchone()[0]
+        with self.connection:
+            self.connection.execute("UPDATE extractions SET candidate_json = ? WHERE source_id = ?",
+                                    (json.dumps([{**self.player, "goals": 5}]), source_id))
+
+        result = import_pending(self.connection, refreshed_source_ids={source_id})
+
+        self.assertEqual(result["imported_sources"], 0)
+        self.assertEqual(result["unchanged_sources"], 1)
+        self.assertEqual(self.connection.execute("SELECT goals FROM player_matches").fetchone()[0], 1)
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM reviews").fetchone()[0], 2)
+
+    def test_import_reuses_historical_player_and_club_corrections(self):
+        raw_match = {**self.match, "home_club": "Notts Countv"}
+        raw_player = {**self.player, "player": "Harry KewelI", "club": "Notts Countv"}
+        self.extract(("match_facts", [raw_match]), ("player_performance", [raw_player]),
+                     ("match_facts", [{**raw_match, "played_on": "2018-07-05"}]), ("player_performance", [raw_player]))
+        reviewed = make_review(self.connection, {73, 74})
+        reviewed["sources"][0]["records"] = [self.match]
+        reviewed["sources"][1]["records"] = [{**self.player, "match_source_id": reviewed["sources"][0]["source_id"]}]
+        for source in reviewed["sources"]:
+            source["complete"] = True
+        approve_review(self.connection, reviewed, "Historical name corrections")
+
+        result = import_pending(self.connection)
+
+        self.assertEqual(result["imported_sources"], 2)
+        self.assertEqual(result["skipped_sources"], [])
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM players").fetchone()[0], 1)
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM clubs").fetchone()[0], 2)
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM matches").fetchone()[0], 2)
+        self.assertEqual(self.connection.execute("SELECT name FROM players").fetchone()[0], "Harry Kewell")
+
+    def test_goalkeeper_shootout_count_is_normalized_automatically(self):
+        keeper = {**self.player, "player": "Aaron Ramsdale", "displayed_position": "GK", "goals": None, "goals_conceded": 4}
+        self.extract(("match_facts", [{**self.match, "home_penalties": 5, "away_penalties": 3}]),
+                     ("goalkeeper_performance", [keeper]))
+
+        result = import_pending(self.connection)
+
+        self.assertEqual(result["skipped_sources"], [])
+        appearance = self.connection.execute("SELECT * FROM player_matches").fetchone()
+        self.assertEqual(appearance["goals_conceded"], 1)
+        self.assertEqual(appearance["goals_conceded_displayed"], 4)
+        self.assertIn("shootout", appearance["goals_conceded_basis"])
+
+    def test_ambiguous_goalkeeper_count_is_skipped(self):
+        keeper = {**self.player, "displayed_position": "GK", "goals_conceded": 7}
+        self.extract(("match_facts", [{**self.match, "home_penalties": 5, "away_penalties": 3}]),
+                     ("goalkeeper_performance", [keeper]))
+
+        result = import_pending(self.connection)
+
+        self.assertEqual(result["imported_sources"], 1)
+        self.assertEqual(len(result["skipped_sources"]), 1)
+        self.assertIn("Ambiguous shootout", result["skipped_sources"][0]["reason"])
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM player_matches").fetchone()[0], 0)
+
+
 class CommandTests(DatabaseTestCase):
     def setUp(self):
         super().setUp()
@@ -716,28 +852,55 @@ class CommandTests(DatabaseTestCase):
                 self.assertEqual(result.returncode, 2)
                 self.assertIn(f"Unknown command: {command}", result.stderr)
 
-    def test_process_approve_and_dashboard_use_one_sqlite_database(self):
+    def test_process_and_dashboard_use_one_sqlite_database_without_approval(self):
         self.create_image()
         processed = self.command("process")
         self.assertEqual(processed["extraction"]["extracted"], 1)
-        self.assertIn("python3 -m processing approve", processed["next"])
-        self.assertNotIn("./run approve", processed["next"])
-        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM matches").fetchone()[0], 0)
-        review_path = Path(processed["review_file"])
-        self.assertTrue(review_path.is_file())
-        self.command("approve", review_path, "--note", "Visually checked")
+        self.assertEqual(processed["import"]["imported_sources"], 1)
+        self.assertNotIn("next", processed)
+        self.assertNotIn("review_file", processed)
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM matches").fetchone()[0], 1)
         self.assertEqual(len(self.command("data")["matches"]), 1)
         repeat = self.command("process")
         self.assertEqual(repeat["extraction"]["extracted"], 0)
+        self.assertEqual(repeat["import"]["imported_sources"], 0)
         self.assertNotIn("review_file", repeat)
         self.extractor.extract.assert_called_once()
         self.assertNotIn("source_images", self.command("data"))
 
+    def test_process_imports_previously_extracted_screenshots(self):
+        self.create_image()
+        inventory(self.connection, self.root)
+        extract_pending(self.connection, self.root, extractor=self.extractor)
+
+        result = self.command("process")
+
+        self.assertEqual(result["extraction"]["extracted"], 0)
+        self.assertEqual(result["import"]["imported_sources"], 1)
+        self.assertEqual(len(self.command("data")["matches"]), 1)
+        self.extractor.extract.assert_called_once()
+
+    def test_process_automatically_links_player_screenshots(self):
+        self.create_image()
+        self.create_image("Screenshot (74).png", color="black")
+        self.extractor.extract.side_effect = [self.extractor.extract.return_value, {
+            "screen_type": "player_performance", "records": [{
+                "type": "player_match", "player": "Harry Kewell", "club": "Notts County",
+                "match_id": None, "rating": 7.5, "goals": 1,
+            }], "evidence": {}, "issues": [],
+        }]
+
+        result = self.command("process")
+
+        self.assertEqual(result["import"]["imported_sources"], 2)
+        self.assertEqual(result["import"]["skipped_sources"], [])
+        data = self.command("data")
+        self.assertEqual(data["player_matches"][0]["match_id"], data["matches"][0]["id"])
+
     def test_process_clean_backs_up_reviewed_data_and_reprocesses_known_images(self):
         image = self.create_image()
         original_bytes = image.read_bytes()
-        first = self.command("process")
-        self.command("approve", first["review_file"], "--note", "Checked before clean")
+        self.command("process")
         source_id = self.connection.execute("SELECT id FROM source_images").fetchone()[0]
         match_id = self.connection.execute("SELECT id FROM matches").fetchone()[0]
         self.connection.close()
@@ -748,9 +911,10 @@ class CommandTests(DatabaseTestCase):
         self.assertEqual(cleaned["inventory"]["new_images"], 1)
         self.assertEqual(cleaned["extraction"]["extracted"], 1)
         self.assertEqual(cleaned["extraction"]["skipped"], 0)
-        self.assertEqual(self.command("data")["matches"], [])
+        self.assertEqual(cleaned["import"]["imported_sources"], 1)
+        self.assertEqual(len(self.command("data")["matches"]), 1)
+        self.assertNotEqual(self.command("data")["matches"][0]["id"], match_id)
         self.assertEqual(image.read_bytes(), original_bytes)
-        self.assertTrue(Path(first["review_file"]).is_file())
         with closing(sqlite3.connect(cleaned["backup"])) as backup:
             self.assertEqual(backup.execute("PRAGMA integrity_check").fetchone()[0], "ok")
             self.assertEqual(backup.execute("SELECT id FROM matches").fetchone()[0], match_id)
@@ -758,7 +922,7 @@ class CommandTests(DatabaseTestCase):
             self.assertEqual(backup.execute("SELECT COUNT(*) FROM reviews").fetchone()[0], 1)
         with closing(connect(cleaned["database"])) as rebuilt:
             self.assertNotEqual(rebuilt.execute("SELECT id FROM source_images").fetchone()[0], source_id)
-            self.assertEqual(rebuilt.execute("SELECT COUNT(*) FROM reviews").fetchone()[0], 0)
+            self.assertEqual(rebuilt.execute("SELECT COUNT(*) FROM reviews").fetchone()[0], 1)
             self.assertEqual(validate_database(rebuilt), [])
         self.assertEqual(self.command("process")["extraction"]["extracted"], 0)
         self.assertEqual(self.extractor.extract.call_count, 2)
@@ -779,7 +943,7 @@ class CommandTests(DatabaseTestCase):
         self.assertNotIn("backup", result)
         self.assertEqual(result["extraction"]["extracted"], 1)
         with closing(connect(result["database"])) as rebuilt:
-            self.assertEqual(rebuilt.execute("SELECT COUNT(*) FROM matches").fetchone()[0], 0)
+            self.assertEqual(rebuilt.execute("SELECT COUNT(*) FROM matches").fetchone()[0], 1)
         self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM matches").fetchone()[0], 1)
 
     def test_clean_with_empty_screenshot_folder_resets_stats_and_preserves_backup(self):
@@ -791,7 +955,7 @@ class CommandTests(DatabaseTestCase):
         self.assertEqual(result["inventory"]["files"], 0)
         self.assertEqual(result["extraction"]["extracted"], 0)
         self.assertNotIn("review_file", result)
-        self.assertIn("reset database contains no reviewed stats", result["message"])
+        self.assertIn("reset database contains no saved stats", result["message"])
         self.assertEqual(self.command("data")["matches"], [])
         with closing(sqlite3.connect(result["backup"])) as backup:
             self.assertEqual(backup.execute("SELECT COUNT(*) FROM matches").fetchone()[0], 1)
@@ -836,8 +1000,7 @@ class CommandTests(DatabaseTestCase):
     def test_delete_and_replace_screenshot_never_loses_saved_stats(self):
         original = self.create_image()
         original_bytes = original.read_bytes()
-        first = self.command("process")
-        self.command("approve", first["review_file"], "--note", "First match checked")
+        self.command("process")
         original.unlink()
         self.assertEqual(self.command("process")["extraction"]["extracted"], 0)
         self.assertEqual(len(self.command("data")["matches"]), 1)
@@ -846,7 +1009,6 @@ class CommandTests(DatabaseTestCase):
         self.create_image(color="black")
         second = self.command("process")
         self.assertEqual(second["inventory"]["new_images"], 1)
-        self.command("approve", second["review_file"], "--note", "Second match checked")
         self.assertEqual(len(self.command("data")["matches"]), 2)
         (self.raw / "old-image-renamed.png").write_bytes(original_bytes)
         self.assertEqual(self.command("process")["extraction"]["extracted"], 0)
