@@ -164,6 +164,16 @@ def make_review(connection, sequences=None, match_id=None, source_ids=None):
         records = previous["records"] if previous else candidates
         complete = previous["complete"] if previous else False
         issues = json.loads(extraction["issues_json"])
+        if (previous and source["screen_type"] in {"player_performance", "goalkeeper_performance"}
+                and len(records) == len(candidates) == 1
+                and records[0].get("type") == candidates[0].get("type") == "player_match"):
+            additions = {field: value for field, value in candidates[0].items()
+                         if field not in CONTEXT_FIELDS and not field.endswith("_id")
+                         and records[0].get(field) is None and value is not None}
+            if additions:
+                records[0].update(additions)
+                complete = False
+                issues.append("Unreviewed player fields were added from OCR; existing identities, fixture links and reviewed values are retained.")
         if previous and source["screen_type"] in NON_MATCH_SCREEN_TYPES:
             for candidate in candidates:
                 if candidate.get("type") not in {"player_transfer", "competition_event"}:

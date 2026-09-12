@@ -549,6 +549,37 @@ class ImportTests(DatabaseTestCase):
         self.assertIsNone(self.connection.execute("SELECT clearances FROM player_matches").fetchone()[0])
         self.assertEqual(self.connection.execute("SELECT assists FROM player_matches").fetchone()[0], 1)
 
+    def test_player_review_restores_detailed_candidates_without_overwriting_core_corrections(self):
+        match_source, document = self.approved_match()
+        player_source = self.prepare_source(76, "black")
+        extractor = Mock()
+        extractor.extract.return_value = {
+            "screen_type": "player_performance", "evidence": {}, "issues": [], "records": [{
+                "type": "player_match", "player": "Kubo OCR", "club": "Wrong OCR club", "match_id": None,
+                "goals": 9, "assists": 8, "key_passes": 3, "interceptions": 4, "passes_completed_short": 15,
+            }],
+        }
+        extract_pending(self.connection, self.root, {76}, extractor=extractor)
+        reviewed = {"type": "player_match", "player": "Takefusa Kubo", "club": "Notts County",
+                    "match_id": self.match_id, "goals": 0, "assists": 1, "key_passes": 2, "interceptions": None}
+        approve_review(self.connection, self.review(player_source, [reviewed]), "Corrected core fields")
+
+        source = make_review(self.connection, {76})["sources"][0]
+        record = source["records"][0]
+
+        self.assertEqual(record["player"], "Takefusa Kubo")
+        self.assertEqual(record["club"], "Notts County")
+        self.assertEqual(record["match_id"], self.match_id)
+        self.assertEqual((record["goals"], record["assists"], record["key_passes"]), (0, 1, 2))
+        self.assertEqual(record["interceptions"], 4)
+        self.assertEqual(record["passes_completed_short"], 15)
+        self.assertFalse(source["complete"])
+        self.assertTrue(any("Unreviewed player fields" in issue for issue in source["issues"]))
+        self.assertIsNone(self.connection.execute("SELECT interceptions FROM player_matches").fetchone()[0])
+        approve_review(self.connection, {"schema_version": 3, "sources": [source]}, "Detailed fields checked")
+        saved = self.connection.execute("SELECT goals, assists, key_passes, interceptions, passes_completed_short FROM player_matches").fetchone()
+        self.assertEqual(tuple(saved), (0, 1, 2, 4, 15))
+
     def test_fixture_context_rejects_interrupted_player_groups(self):
         source_id, document = self.approved_match()
         self.connection.execute("UPDATE source_images SET screen_type = 'match_facts' WHERE id = ?", (source_id,))
