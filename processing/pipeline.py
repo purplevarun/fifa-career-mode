@@ -15,6 +15,7 @@ from .reconciliation import reconcile_totals
 
 
 BOOLEAN_FIELDS = {"is_preseason", "extra_time", "started"}
+NON_MATCH_SCREEN_TYPES = {"transfer", "news", "competition_result", "dashboard_award"}
 RECORD_TABLES = {
     "match": "matches", "player_match": "player_matches", "player_snapshot": "player_snapshots",
     "player_competition_snapshot": "player_competition_snapshots",
@@ -70,8 +71,14 @@ def extract_pending(connection, root, sequences=None, limit=None, reextract=Fals
     counts = {"extracted": 0, "skipped": 0, "errors": 0, "remaining": 0, "processed_source_ids": []}
     attempted = 0
     for source in sources:
-        existing = connection.execute("SELECT 1 FROM extractions WHERE source_id = ?", (source["id"],)).fetchone()
-        if existing and not reextract:
+        existing = connection.execute("SELECT extractor_version, evidence_json FROM extractions WHERE source_id = ?", (source["id"],)).fetchone()
+        updated_layout = existing and existing["extractor_version"] != EXTRACTOR_VERSION and source["screen_type"] in NON_MATCH_SCREEN_TYPES
+        if existing and existing["extractor_version"] != EXTRACTOR_VERSION and source["screen_type"] == "dashboard":
+            from .extraction import classify
+
+            tokens = json.loads(existing["evidence_json"]).get("full_image_tokens", [])
+            updated_layout = classify(" ".join(token["text"] for token in tokens)) == "dashboard_award"
+        if existing and not reextract and not updated_layout:
             counts["skipped"] += 1
             continue
         if source["width"] is None or source["height"] is None:
@@ -92,6 +99,7 @@ def extract_pending(connection, root, sequences=None, limit=None, reextract=Fals
             if image_hash(path) != source["sha256"]:
                 raise ValueError("Image changed after inventory; run inventory again")
             result = extractor.extract(path)
+            resolve_candidate_players(connection, result)
             with connection:
                 connection.execute(
                     "INSERT INTO extractions(source_id, extractor_version, candidate_json, evidence_json, issues_json) "
@@ -121,6 +129,23 @@ def extract_pending(connection, root, sequences=None, limit=None, reextract=Fals
     return counts
 
 
+def resolve_candidate_players(connection, extraction):
+    players = connection.execute("SELECT id, name FROM players").fetchall()
+    for record in extraction["records"]:
+        name = record.get("player")
+        if record.get("type") not in {"player_transfer", "competition_event"} or not name or record.get("player_id"):
+            continue
+        normalized = normalized_name(name).casefold()
+        alias = connection.execute("SELECT player_id FROM player_aliases WHERE alias = ?", (normalized,)).fetchone()
+        exact = [player for player in players if player["name"].casefold() == normalized or (alias and player["id"] == alias[0])]
+        matching = exact or [player for player in players if player["name"].casefold().endswith(f" {normalized}")]
+        if len(matching) == 1:
+            record["player_id"] = matching[0]["id"]
+            record["player"] = matching[0]["name"]
+            if not exact:
+                extraction["issues"].append(f"OCR name {name!r} matched existing player {record['player']!r}; confirm this identity.")
+        elif len(matching) > 1:
+            extraction["issues"].append(f"Ambiguous OCR player {name!r}; select the correct existing player_id during review.")
 
 
 def make_review(connection, sequences=None, match_id=None, source_ids=None):
@@ -135,7 +160,26 @@ def make_review(connection, sequences=None, match_id=None, source_ids=None):
             "SELECT payload_json FROM reviews WHERE source_id = ? ORDER BY revision DESC LIMIT 1", (source["id"],),
         ).fetchone()
         previous = json.loads(latest["payload_json"]) if latest else None
-        records = previous["records"] if previous else json.loads(extraction["candidate_json"])
+        candidates = json.loads(extraction["candidate_json"])
+        records = previous["records"] if previous else candidates
+        complete = previous["complete"] if previous else False
+        issues = json.loads(extraction["issues_json"])
+        if previous and source["screen_type"] in NON_MATCH_SCREEN_TYPES:
+            for candidate in candidates:
+                if candidate.get("type") not in {"player_transfer", "competition_event"}:
+                    continue
+                key_fields = (("type", "player", "transfer_type") if candidate["type"] == "player_transfer"
+                              else ("type", "event_type", "player", "club", "period"))
+                reviewed = next((record for record in records if all(record.get(field) == candidate.get(field) for field in key_fields)), None)
+                if reviewed is None:
+                    records.append(candidate)
+                    complete = False
+                else:
+                    additions = {field: value for field, value in candidate.items() if reviewed.get(field) is None and value is not None}
+                    if additions:
+                        reviewed.update(additions)
+                        complete = False
+            issues.append("New non-match OCR may fill unknown fields or add events; existing reviewed values are retained.")
         if match_id is not None:
             for record in records:
                 if record.get("type") == "player_match":
@@ -143,8 +187,7 @@ def make_review(connection, sequences=None, match_id=None, source_ids=None):
                     record.pop("match_source_id", None)
         sources.append({
             "source_id": source["id"], "path": source["path"], "screen_type": source["screen_type"],
-            "complete": previous["complete"] if previous else False,
-            "records": records, "issues": json.loads(extraction["issues_json"]),
+            "complete": complete, "records": records, "issues": issues,
         })
     return {"schema_version": SCHEMA_VERSION, "sources": sources}
 

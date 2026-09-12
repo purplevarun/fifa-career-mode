@@ -11,10 +11,12 @@ from unittest.mock import Mock, patch
 
 from PIL import Image
 
+from processing import EXTRACTOR_VERSION
 from processing.database import connect, coverage_report, insert_entity, inventory, status, validate_database
 from processing.pipeline import approve_review, backup_database, dashboard_data, ensure_club, ensure_edition, ensure_season, export_data, extract_pending, make_review
 from processing.batch_review import fixture_contexts, prepare_player_cores
 from processing.identifiers import is_uuid, new_id
+from processing.extraction import parse_news_event
 from processing.reconciliation import reconcile_totals
 
 
@@ -322,12 +324,136 @@ class ImportTests(DatabaseTestCase):
         review = make_review(self.connection, {73})
         self.assertEqual(review["sources"][0]["records"][0]["home_goals"], 1)
 
+    def test_new_non_match_layouts_refresh_once_without_touching_reviewed_stats(self):
+        match_source, document = self.approved_match()
+        transfer_source = self.prepare_source(1124, "black")
+        transfer = {"type": "player_transfer", "player": "Test Player", "to_club": "Notts County",
+                    "transfer_type": "permanent", "date_basis": "Year unknown", "contract_months": 24}
+        approve_review(self.connection, self.review(transfer_source, [transfer]), "Reviewed signing")
+        for source_id, screen_type in ((match_source, "match_facts"), (transfer_source, "transfer")):
+            self.connection.execute("UPDATE source_images SET screen_type = ? WHERE id = ?", (screen_type, source_id))
+            self.connection.execute(
+                "INSERT INTO extractions(source_id, extractor_version, candidate_json, evidence_json, issues_json) VALUES (?, '1.1.0', '[]', '{}', '[]')",
+                (source_id,),
+            )
+        self.connection.commit()
+        before = tuple(self.connection.execute("SELECT * FROM player_transfers").fetchone())
+        reviewed = [tuple(row) for row in self.connection.execute("SELECT * FROM reviews ORDER BY id")]
+        extractor = Mock()
+        extractor.extract.return_value = {"screen_type": "transfer", "records": [{**transfer, "contract_months": 99}], "evidence": {}, "issues": []}
+        result = extract_pending(self.connection, self.root, extractor=extractor)
+        self.assertEqual((result["extracted"], result["skipped"]), (1, 1))
+        self.assertEqual(result["processed_source_ids"], [transfer_source])
+        self.assertEqual(tuple(self.connection.execute("SELECT * FROM player_transfers").fetchone()), before)
+        self.assertEqual([tuple(row) for row in self.connection.execute("SELECT * FROM reviews ORDER BY id")], reviewed)
+        self.assertEqual(self.connection.execute("SELECT extractor_version FROM extractions WHERE source_id = ?", (transfer_source,)).fetchone()[0], EXTRACTOR_VERSION)
+        self.assertEqual(self.connection.execute("SELECT extractor_version FROM extractions WHERE source_id = ?", (match_source,)).fetchone()[0], "1.1.0")
+        second = extract_pending(self.connection, self.root, extractor=extractor)
+        self.assertEqual((second["extracted"], second["skipped"]), (0, 2))
+        self.assertEqual(extractor.extract.call_count, 1)
+        self.assertEqual(make_review(self.connection, {1124})["sources"][0]["records"][0]["contract_months"], 24)
 
+    def test_failed_layout_refresh_retries_without_marking_it_current(self):
+        source_id = self.prepare_source(328, "white")
+        self.connection.execute("UPDATE source_images SET screen_type = 'news' WHERE id = ?", (source_id,))
+        self.connection.execute(
+            "INSERT INTO extractions(source_id, extractor_version, candidate_json, evidence_json, issues_json) VALUES (?, '1.1.0', '[]', '{}', '[]')",
+            (source_id,),
+        )
+        self.connection.commit()
+        extractor = Mock()
+        extractor.extract.side_effect = [ValueError("OCR interrupted"), {"screen_type": "news", "records": [], "evidence": {}, "issues": []}]
+        self.assertEqual(extract_pending(self.connection, self.root, extractor=extractor)["errors"], 1)
+        self.assertEqual(self.connection.execute("SELECT extractor_version FROM extractions").fetchone()[0], "1.1.0")
+        self.assertEqual(extract_pending(self.connection, self.root, extractor=extractor)["extracted"], 1)
 
+    def test_only_dashboard_award_tiles_are_refreshed(self):
+        award_source = self.prepare_source(823, "white")
+        ordinary_source = self.prepare_source(824, "black")
+        for source_id, text in ((award_source, "STANDINGS Williams grabs January Player of the Month Award"),
+                                (ordinary_source, "Mr. Kedia STANDINGS TRANSFER HUB")):
+            self.connection.execute("UPDATE source_images SET screen_type = 'dashboard' WHERE id = ?", (source_id,))
+            evidence = json.dumps({"full_image_tokens": [{"text": text}]})
+            self.connection.execute(
+                "INSERT INTO extractions(source_id, extractor_version, candidate_json, evidence_json, issues_json) VALUES (?, '1.1.0', '[]', ?, '[]')",
+                (source_id, evidence),
+            )
+        self.connection.commit()
+        extractor = Mock()
+        extractor.extract.return_value = {"screen_type": "dashboard_award", "records": [], "evidence": {}, "issues": []}
+        result = extract_pending(self.connection, self.root, extractor=extractor)
+        self.assertEqual(result["processed_source_ids"], [award_source])
+        self.assertEqual((result["extracted"], result["skipped"]), (1, 1))
 
+    def test_news_ocr_reuses_existing_player_and_imports_monthly_award_once(self):
+        source_id = self.prepare_source(328, "white")
+        player_id = self.create_player("Andy King")
+        self.connection.commit()
+        candidate = parse_news_event("King grabs August Player of the Month Award",
+                                     "King's impressive performance for Notts County earned him the EFL League Two award.", "2018-09-05")
+        extractor = Mock()
+        extractor.extract.return_value = {"screen_type": "news", "records": [candidate], "evidence": {}, "issues": []}
+        extract_pending(self.connection, self.root, extractor=extractor)
+        review = make_review(self.connection, {328})
+        record = review["sources"][0]["records"][0]
+        self.assertEqual((record["player"], record["player_id"]), ("Andy King", player_id))
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM competition_events").fetchone()[0], 0)
+        approve_review(self.connection, review, "Checked monthly award")
+        approve_review(self.connection, review, "Repeat")
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM players").fetchone()[0], 1)
+        self.assertEqual(self.connection.execute("SELECT player_id, period FROM competition_events").fetchone()[:], (player_id, "2018-08"))
+        self.assertEqual(len(dashboard_data(self.connection)["competition_events"]), 1)
 
+    def test_news_ocr_does_not_choose_between_players_with_same_surname(self):
+        self.prepare_source(328, "white")
+        self.create_player("Andy King")
+        self.create_player("Joshua King")
+        self.connection.commit()
+        candidate = parse_news_event("King grabs August Player of the Month Award", announced_on="2018-09-05")
+        extractor = Mock()
+        extractor.extract.return_value = {"screen_type": "news", "records": [candidate], "evidence": {}, "issues": []}
+        extract_pending(self.connection, self.root, extractor=extractor)
+        source = make_review(self.connection, {328})["sources"][0]
+        self.assertNotIn("player_id", source["records"][0])
+        self.assertEqual(source["records"][0]["player"], "King")
+        self.assertTrue(any("Ambiguous OCR player" in issue for issue in source["issues"]))
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM players").fetchone()[0], 2)
 
+    def test_refreshed_news_adds_new_awards_without_replacing_reviewed_values(self):
+        source_id = self.prepare_source(1053, "white")
+        reviewed = {"type": "competition_event", "event_type": "goalkeeper_of_the_competition",
+                    "player": "Aaron Ramsdale", "club": "Notts County", "competition": "EFL League Two",
+                    "season": "2018/19", "period": "2018/19", "announced_on": "2019-05-04", "description": "Reviewed award"}
+        approve_review(self.connection, self.review(source_id, [reviewed]), "Existing checked award")
+        before = tuple(self.connection.execute("SELECT * FROM competition_events").fetchone())
+        news = {**reviewed, "description": "Fresh OCR wording"}
+        champion = {"type": "competition_event", "event_type": "champion", "club": "Notts County",
+                    "competition": "EFL League Two", "season": "2018/19", "period": "2018/19",
+                    "announced_on": "2019-05-04", "description": "Notts County Crowned EFL League Two Champions"}
+        extractor = Mock()
+        extractor.extract.return_value = {"screen_type": "news", "records": [news, champion], "evidence": {}, "issues": []}
+        extract_pending(self.connection, self.root, extractor=extractor)
+        source = make_review(self.connection, {1053})["sources"][0]
+        self.assertEqual(len(source["records"]), 2)
+        self.assertEqual(source["records"][0]["description"], "Reviewed award")
+        self.assertEqual(source["records"][1]["event_type"], "champion")
+        self.assertFalse(source["complete"])
+        self.assertEqual(tuple(self.connection.execute("SELECT * FROM competition_events").fetchone()), before)
 
+    def test_new_transfer_ocr_proposes_unknown_wage_without_changing_saved_contract(self):
+        source_id = self.prepare_source(1124, "white")
+        transfer = {"type": "player_transfer", "player": "Matty James", "to_club": "Notts County",
+                    "transfer_type": "permanent", "date_basis": "Year unknown", "contract_months": 24, "weekly_wage_minor": None}
+        approve_review(self.connection, self.review(source_id, [transfer]), "Reviewed signing")
+        extractor = Mock()
+        extractor.extract.return_value = {"screen_type": "transfer", "records": [{**transfer, "weekly_wage_minor": 3599900, "contract_months": 99}], "evidence": {}, "issues": []}
+        extract_pending(self.connection, self.root, extractor=extractor)
+        source = make_review(self.connection, {1124})["sources"][0]
+        self.assertEqual(len(source["records"]), 1)
+        self.assertEqual(source["records"][0]["weekly_wage_minor"], 3599900)
+        self.assertEqual(source["records"][0]["contract_months"], 24)
+        self.assertFalse(source["complete"])
+        self.assertIsNone(self.connection.execute("SELECT weekly_wage_minor FROM player_transfers").fetchone()[0])
 
     def test_export_and_backup_preserve_canonical_data(self):
         self.approved_match()
