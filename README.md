@@ -137,8 +137,13 @@ were preserved during this cleanup. Git history is not rewritten automatically.
 the same SQLite endpoint. A static upload to a hosting provider is not part of
 this local app.
 
-Missing/unreviewed values stay unknown, shootout scores stay separate from match
-goals, and cumulative season totals are not added to match totals. Optional
+Missing goals scored default to zero for appearances recorded as GK in the
+dashboard and reconciliation, with assumed values marked in the data and
+verification tooltips. A recorded match position takes precedence over the
+displayed position. Existing goal counts are never replaced, and the raw SQLite
+values are retained. Other missing values, including outfield goals, stay
+unknown. Shootout scores stay separate from match goals, and cumulative season
+totals are not added to match totals. Optional
 real-image OCR regression tests use
 `CAREER_OCR_TESTS=1 python3 -W error::ResourceWarning -m unittest discover -s processing/tests -q`
 while those original fixtures remain available.

@@ -915,6 +915,62 @@ class ReconciliationTests(DatabaseTestCase):
         self.assertIsNone(metric["derived"])
         self.assertEqual(metric["missing_match_values"], 1)
 
+    def test_missing_goalkeeper_goals_default_to_zero_without_changing_sqlite(self):
+        self.prepare_stats(missing_goals=True)
+        self.connection.execute("UPDATE player_matches SET displayed_position = 'GK'")
+        self.connection.execute("UPDATE player_competition_snapshots SET goals = 0")
+
+        report = reconcile_totals(self.connection)
+        comparison = report["comparisons"][0]
+        goals = comparison["metrics"]["goals"]
+
+        self.assertEqual(comparison["result"], "match")
+        self.assertEqual(report["summary"]["partial_comparisons"], 0)
+        self.assertEqual(goals["derived"], 0)
+        self.assertEqual(goals["missing_match_values"], 0)
+        self.assertEqual(goals["assumed_zero_match_values"], 1)
+        self.assertIsNone(self.connection.execute("SELECT goals FROM player_matches").fetchone()[0])
+
+    def test_dashboard_uses_the_same_goalkeeper_default_and_keeps_its_provenance(self):
+        self.prepare_stats(missing_goals=True)
+        self.connection.execute("UPDATE player_competition_snapshots SET goals = 0")
+        for position, recorded, expected, assumed in (
+            ("GK", None, 0, True),
+            ("GK", 2, 2, False),
+            ("CAM", None, None, False),
+            (None, None, None, False),
+        ):
+            with self.subTest(position=position, recorded=recorded):
+                self.connection.execute("UPDATE player_matches SET displayed_position = ?, goals = ?", (position, recorded))
+                data = dashboard_data(self.connection)
+                performance = data["player_matches"][0]
+                self.assertEqual(performance["goals"], expected)
+                self.assertIs(performance["goals_assumed_zero"], assumed)
+                self.assertEqual(data["season_reconciliation"]["comparisons"][0]["metrics"]["goals"]["derived"], expected)
+                self.assertEqual(self.connection.execute("SELECT goals FROM player_matches").fetchone()[0], recorded)
+
+    def test_recorded_goalkeeper_goals_are_never_replaced(self):
+        self.prepare_stats()
+        self.connection.execute("UPDATE player_matches SET displayed_position = 'GK'")
+        goals = reconcile_totals(self.connection)["comparisons"][0]["metrics"]["goals"]
+        self.assertEqual(goals["result"], "match")
+        self.assertEqual(goals["derived"], 1)
+        self.assertEqual(goals["assumed_zero_match_values"], 0)
+
+    def test_goalkeeper_rule_does_not_default_other_metrics_or_outfield_appearances(self):
+        self.prepare_stats(missing_goals=True)
+        self.connection.execute("UPDATE player_matches SET displayed_position = 'GK', played_position = 'ST'")
+        goals = reconcile_totals(self.connection)["comparisons"][0]["metrics"]["goals"]
+        self.assertIsNone(goals["derived"])
+        self.assertEqual(goals["assumed_zero_match_values"], 0)
+
+        self.connection.execute("UPDATE player_matches SET played_position = 'GK', assists = NULL")
+        self.connection.execute("UPDATE player_competition_snapshots SET goals = 0")
+        comparison = reconcile_totals(self.connection)["comparisons"][0]
+        self.assertEqual(comparison["result"], "partial_comparison")
+        self.assertEqual(comparison["metrics"]["goals"]["derived"], 0)
+        self.assertIsNone(comparison["metrics"]["assists"]["derived"])
+
     def test_goal_discrepancy_does_not_rewrite_either_source(self):
         self.prepare_stats()
         self.connection.execute("UPDATE player_competition_snapshots SET goals = 3")

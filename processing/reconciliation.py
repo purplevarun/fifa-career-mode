@@ -4,6 +4,12 @@ from decimal import Decimal, ROUND_DOWN
 from . import SCHEMA_VERSION
 
 
+def player_match_goals(performance):
+    goals = performance["goals"]
+    position = performance["played_position"] or performance["displayed_position"]
+    return 0 if goals is None and position == "GK" else goals
+
+
 def compare_metric(observed, derived, missing=0):
     if observed is None:
         result = "not_captured"
@@ -59,9 +65,16 @@ def reconcile_totals(connection, season=None, club="Notts County", rating_decima
         ).fetchall()
         metrics = {"appearances": compare_metric(snapshot["appearances"], len(performances))}
         for field in ("goals", "assists"):
-            missing = sum(performance[field] is None for performance in performances)
-            derived = sum(performance[field] for performance in performances) if not missing else None
+            match_values = [player_match_goals(performance) if field == "goals" else performance[field]
+                            for performance in performances]
+            missing = sum(value is None for value in match_values)
+            derived = sum(match_values) if not missing else None
             metrics[field] = compare_metric(snapshot[field], derived, missing)
+            if field == "goals":
+                metrics[field]["assumed_zero_match_values"] = sum(
+                    performance["goals"] is None and value == 0
+                    for performance, value in zip(performances, match_values)
+                )
         missing_ratings = sum(performance["rating"] is None for performance in performances)
         average = displayed_average = None
         if performances and not missing_ratings:
@@ -97,7 +110,7 @@ def reconcile_totals(connection, season=None, club="Notts County", rating_decima
             "All-competition comparisons include preseason games belonging to that season.",
             "An undated in-season observation cannot be compared until its cutoff is confirmed.",
             "The one-decimal truncation rule matches the observed first-season display; the raw average remains visible and other editions may use different formatting.",
-            "Missing goalkeeper scoring fields are not treated as zero. Unknown match values remain not comparable.",
+            "Missing goals scored are treated as zero for goalkeeper appearances; recorded goals are retained. Unknown outfield goals remain not comparable.",
             "Passes and blocks have no season-end counterpart; cards and outfield clean sheets are retained without inventing unobserved match events or participation times.",
         ],
     }

@@ -11,7 +11,7 @@ from pathlib import Path
 from . import EXTRACTOR_VERSION, SCHEMA_VERSION
 from .database import EXPORT_TABLES, coverage_report, image_hash, insert_entity, json_text, status, validate_database
 from .identifiers import is_uuid, normalize_references
-from .reconciliation import reconcile_totals
+from .reconciliation import player_match_goals, reconcile_totals
 
 
 BOOLEAN_FIELDS = {"is_preseason", "extra_time", "started"}
@@ -525,6 +525,10 @@ def build_dataset(connection):
             for field in BOOLEAN_FIELDS & row.keys():
                 if row[field] is not None:
                     row[field] = bool(row[field])
+            if table == "player_matches":
+                goals = player_match_goals(row)
+                row["goals_assumed_zero"] = row["goals"] is None and goals == 0
+                row["goals"] = goals
         data[table] = rows
     data["source_images"] = [dict(row) for row in connection.execute(
         "SELECT source_images.id, sha256, screen_type, status, "
