@@ -9,7 +9,6 @@ import {
 	Menu,
 	RefreshCw,
 	RotateCcw,
-	Shield,
 	ShieldCheck,
 	Trophy,
 	Users,
@@ -26,6 +25,7 @@ import {
 } from "react-router-dom";
 import "./App.css";
 import { Audit, CareerRecords, Explorer } from "./archive";
+import nottsCountyCrest from "./assets/notts-county-crest.png";
 import { CareerContext } from "./context";
 import type { Filters, Model } from "./data";
 import { createModel, dateLabel, downloadJson, selectMatches } from "./data";
@@ -108,10 +108,14 @@ function Shell({
 				)}
 				<aside className={`sidebar ${mobileMenu ? "open" : ""}`}>
 					<div className="brand">
-						<span className="club-mark">
-							<Shield size={28} strokeWidth={1.4} />
-							<b>NC</b>
-						</span>
+						<img
+							src={nottsCountyCrest}
+							alt="Notts County crest"
+							className="club-mark"
+							width={32}
+							height={43}
+							draggable={false}
+						/>
 						<div>
 							<strong>NOTTS COUNTY</strong>
 							<span>CAREER ARCHIVE</span>
@@ -381,7 +385,13 @@ function App() {
 	if (!model)
 		return (
 			<div className="load-screen">
-				<Shield size={40} />
+				<img
+					src={nottsCountyCrest}
+					alt="Notts County crest"
+					width={64}
+					height={85}
+					draggable={false}
+				/>
 				<h1>Notts County</h1>
 				{error ? (
 					<>

@@ -2,7 +2,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { fixture } from "../tests/fixture";
+import App from "./App";
 import { Audit, CareerRecords, Explorer } from "./archive";
+import nottsCountyCrest from "./assets/notts-county-crest.png";
 import { CareerContext } from "./context";
 import { createModel, defaultFilters } from "./data";
 import {
@@ -17,6 +19,14 @@ import {
 const model = createModel(fixture);
 
 describe("local stats pages", () => {
+	it("shows the club crest while career data loads", () => {
+		const html = renderToStaticMarkup(<App />);
+		expect(html).toContain(`src="${nottsCountyCrest}"`);
+		expect(html).toContain('alt="Notts County crest"');
+		expect(html).toContain('draggable="false"');
+		expect(html).not.toContain("lucide-shield");
+	});
+
 	it.each([
 		{
 			name: "overview",
