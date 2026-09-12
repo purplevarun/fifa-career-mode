@@ -92,7 +92,7 @@ def main(argv=None):
                 review_path = database_path.parent / "reviews" / f"review-{new_id()}.json"
                 write_json(review_path, review, overwrite=False)
                 result["review_file"] = str(review_path)
-                result["next"] = "Check the new OCR values against the originals, then run ./run approve <review_file> --note 'Checked'."
+                result["next"] = "Check the new OCR values against the originals, then run python3 -m processing approve <review_file> --note 'Checked'."
             else:
                 result["message"] = "No new OCR results. Saved stats are unchanged."
             print(json_text(result), end="")

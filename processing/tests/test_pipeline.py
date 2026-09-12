@@ -1,8 +1,10 @@
 import copy
 import io
 import json
+import os
 import shutil
 import sqlite3
+import subprocess
 import tempfile
 import unittest
 from contextlib import closing, redirect_stdout
@@ -636,10 +638,57 @@ class CommandTests(DatabaseTestCase):
         text = output.getvalue()
         return json.loads(text[text.index("{"):])
 
+    def launcher(self, *arguments):
+        repository = Path(__file__).resolve().parents[2]
+        bin_dir = self.root / "fake commands"
+        bin_dir.mkdir(exist_ok=True)
+        for name in ("npm", "python3"):
+            executable = bin_dir / name
+            executable.write_text('#!/bin/sh\nprintf "%s\\n" "$PWD" "$@"\n', encoding="utf-8")
+            executable.chmod(0o755)
+        environment = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
+        return subprocess.run(
+            [str(repository / "run"), *arguments], cwd=self.root, env=environment,
+            capture_output=True, text=True, timeout=5,
+        )
+
+    def test_launcher_start_uses_port_5000_from_any_directory(self):
+        repository = Path(__file__).resolve().parents[2]
+        result = self.launcher("start", "--clearScreen", "false")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), [
+            str(repository), "--prefix", str(repository / "frontend"), "run", "dev", "--",
+            "--port", "5000", "--strictPort", "--clearScreen", "false",
+        ])
+
+    def test_launcher_process_forwards_arguments_from_repository_root(self):
+        repository = Path(__file__).resolve().parents[2]
+        result = self.launcher("process", "--limit", "2", "--screenshots", "73,74")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), [
+            str(repository), "-m", "processing", "process", "--limit", "2", "--screenshots", "73,74",
+        ])
+
+    def test_launcher_only_exposes_start_and_process(self):
+        for arguments in ((), ("-h",), ("--help",), ("help",)):
+            with self.subTest(arguments=arguments):
+                result = self.launcher(*arguments)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                commands = [line.split()[0] for line in result.stdout.splitlines() if line.startswith("  ")]
+                self.assertEqual(commands, ["start", "process"])
+        for command in ("dev", "build", "preview", "approve", "review", "status", "backup", "test",
+                        "e2e", "lint", "check", "format", "inventory", "validate", "report", "reconcile", "export"):
+            with self.subTest(command=command):
+                result = self.launcher(command)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn(f"Unknown command: {command}", result.stderr)
+
     def test_process_approve_and_dashboard_use_one_sqlite_database(self):
         self.create_image()
         processed = self.command("process")
         self.assertEqual(processed["extraction"]["extracted"], 1)
+        self.assertIn("python3 -m processing approve", processed["next"])
+        self.assertNotIn("./run approve", processed["next"])
         self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM matches").fetchone()[0], 0)
         review_path = Path(processed["review_file"])
         self.assertTrue(review_path.is_file())

@@ -11,6 +11,8 @@ frontend/                   Vite/React dashboard
 run                         Commands below
 ```
 
+The launcher has two commands: `./run start` and `./run process`.
+
 ## Setup
 
 Use Python 3.11+ and Node 22.12+ (or Node 24).
@@ -23,10 +25,11 @@ npm --prefix frontend ci
 ## Open the Dashboard
 
 ```sh
-./run dev
+./run start
 ```
 
-Open the localhost URL printed by Vite. The dashboard reads the current SQLite
+Open http://127.0.0.1:5000. If port 5000 is already in use, startup stops instead
+of silently choosing another port. The dashboard reads the current SQLite
 database through a local `/api/stats` endpoint. There is no separate server to
 start and no JSON export or frontend rebuild needed when stats change.
 
@@ -64,7 +67,7 @@ Check those values against the originals, supply missing match/season context,
 and approve the file shown by the processor:
 
 ```sh
-./run approve processing/data/reviews/<review-file>.json --note "Checked against originals"
+python3 -m processing approve processing/data/reviews/<review-file>.json --note "Checked against originals"
 ```
 
 Approval saves the stats in one SQLite transaction. Click Reload in the
@@ -86,23 +89,30 @@ Keep `processing/data/career.sqlite`: it contains the stats, review history, and
 small processing checkpoints. It is not committed to Git. Processing does not
 make another permanent copy of your images or delete them automatically.
 
-## Backups and Checks
+## Optional Maintenance
+
+Backups, review tools, and developer checks are available directly through
+Python and npm; they are not additional `./run` commands.
 
 ```sh
-./run status
-./run backup processing/data/backups/my-backup.sqlite
-./run test
-./run check
-./run e2e
+python3 -m processing status
+python3 -m processing backup processing/data/backups/my-backup.sqlite
+python3 -W error::ResourceWarning -m unittest discover -s processing/tests -q
+npm --prefix frontend test
+npm --prefix frontend run lint
+npm --prefix frontend run build
+npm --prefix frontend run test:e2e
 ```
 
 Use a new backup filename each time. The reviewed database and its recovery copy
 were preserved during this cleanup. Git history is not rewritten automatically.
 
-`./run build` and `./run preview` also work locally; preview uses the same SQLite
-endpoint. A static upload to a hosting provider is not part of this local app.
+`npm --prefix frontend run preview` opens a production build locally and uses
+the same SQLite endpoint. A static upload to a hosting provider is not part of
+this local app.
 
 Missing/unreviewed values stay unknown, shootout scores stay separate from match
 goals, and cumulative season totals are not added to match totals. Optional
-real-image OCR regression tests use `CAREER_OCR_TESTS=1 ./run test` while those
-original fixtures remain available.
+real-image OCR regression tests use
+`CAREER_OCR_TESTS=1 python3 -W error::ResourceWarning -m unittest discover -s processing/tests -q`
+while those original fixtures remain available.
