@@ -5,8 +5,6 @@ import {
 	ChevronLeft,
 	ChevronRight,
 	Download,
-	ExternalLink,
-	ImageIcon,
 	Search,
 	X,
 } from "lucide-react";
@@ -14,14 +12,8 @@ import type { ReactNode } from "react";
 import { useDeferredValue, useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useCareer } from "./context";
-import type { Match, Row, Source } from "./data";
-import {
-	display,
-	downloadJson,
-	label,
-	referenceLabel,
-	sourceUrl,
-} from "./data";
+import type { Match, Row } from "./data";
+import { display, downloadJson, label, referenceLabel } from "./data";
 export function CareerLink({
 	to,
 	children,
@@ -238,10 +230,10 @@ export function DataTable<Value extends Row>({
 	const text = deferredQuery.trim().toLocaleLowerCase();
 	const filtered = text
 		? rows.filter((row) =>
-				(searchText?.(row) ?? JSON.stringify(row))
-					.toLocaleLowerCase()
-					.includes(text),
-			)
+			(searchText?.(row) ?? JSON.stringify(row))
+				.toLocaleLowerCase()
+				.includes(text),
+		)
 		: rows;
 	const column = columns.find((column) => column.key === sort.key);
 	const valueOf = (row: Value) =>
@@ -255,8 +247,8 @@ export function DataTable<Value extends Row>({
 			typeof first === "number" && typeof second === "number"
 				? first - second
 				: String(first).localeCompare(String(second), undefined, {
-						numeric: true,
-					});
+					numeric: true,
+				});
 		return sort.desc ? -comparison : comparison;
 	});
 	const pages = Math.max(1, Math.ceil(sorted.length / size)),
@@ -337,8 +329,8 @@ export function DataTable<Value extends Row>({
 														sort.key === column.key
 															? !sort.desc
 															: Boolean(
-																	column.numeric,
-																),
+																column.numeric,
+															),
 												});
 												setPage(0);
 											}}
@@ -378,18 +370,18 @@ export function DataTable<Value extends Row>({
 												{column.render
 													? column.render(row)
 													: display(
-															column.value?.(
-																row,
-															) ??
-																row[column.key],
-														)}
+														column.value?.(
+															row,
+														) ??
+														row[column.key],
+													)}
 											</button>
 										) : column.render ? (
 											column.render(row)
 										) : (
 											display(
 												column.value?.(row) ??
-													row[column.key],
+												row[column.key],
 											)
 										)}
 									</td>
@@ -493,101 +485,6 @@ export function Modal({
 		</dialog>
 	);
 }
-export function SourceButton({
-	sourceId,
-	text = false,
-}: {
-	sourceId: string;
-	text?: boolean;
-}) {
-	const { openSource } = useCareer();
-	return (
-		<button
-			className={text ? "button secondary" : "icon-button"}
-			title="View source screenshot"
-			aria-label="View source screenshot"
-			onClick={() => openSource(sourceId)}
-		>
-			<ImageIcon size={16} />
-			{text && "Source screenshot"}
-		</button>
-	);
-}
-export function SourceImage({
-	source,
-	className = "",
-}: {
-	source: Source;
-	className?: string;
-}) {
-	const [failed, setFailed] = useState(false);
-	return failed ? (
-		<div className={`image-missing ${className}`}>
-			<ImageIcon />
-			<span>Preview unavailable</span>
-		</div>
-	) : (
-		<img
-			className={className}
-			src={sourceUrl(source.id)}
-			alt={`${label(source.screen_type)}: ${source.path.split("/").at(-1)}`}
-			loading="lazy"
-			onError={() => setFailed(true)}
-		/>
-	);
-}
-export function SourceModal({
-	source,
-	onClose,
-}: {
-	source: Source;
-	onClose: () => void;
-}) {
-	return (
-		<Modal
-			title={source.path.split("/").at(-1) ?? "Source screenshot"}
-			onClose={onClose}
-			wide
-		>
-			<div className="source-toolbar">
-				<Pill>{label(source.screen_type)}</Pill>
-				<Pill
-					tone={source.status === "imported" ? "positive" : "warning"}
-				>
-					{source.status === "imported"
-						? "Fully reviewed"
-						: "Partial source review"}
-				</Pill>
-				<div className="grow" />
-				<a
-					className="icon-button"
-					href={sourceUrl(source.id)}
-					download={`${source.id}.webp`}
-					title="Download preview"
-					aria-label="Download preview"
-				>
-					<Download size={17} />
-				</a>
-				{import.meta.env.DEV && (
-					<a
-						className="button secondary"
-						href={`/originals/${source.id}`}
-						target="_blank"
-						rel="noreferrer"
-					>
-						<ExternalLink size={16} />
-						Original
-					</a>
-				)}
-			</div>
-			<SourceImage source={source} className="source-full" />
-			<details className="metadata">
-				<summary>Source metadata</summary>
-				<pre>{JSON.stringify(source, null, 2)}</pre>
-			</details>
-		</Modal>
-	);
-}
 export function RecordDetails({ record }: { record: Row }) {
 	const { model } = useCareer();
 	return (
@@ -598,9 +495,6 @@ export function RecordDetails({ record }: { record: Row }) {
 					<dd>
 						{value !== null && typeof value === "object" ? (
 							<pre>{JSON.stringify(value, null, 2)}</pre>
-						) : field === "source_id" &&
-						  typeof value === "string" ? (
-							<SourceButton sourceId={value} text />
 						) : (
 							<>
 								<span

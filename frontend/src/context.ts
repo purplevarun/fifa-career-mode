@@ -5,7 +5,6 @@ export const CareerContext = createContext<{
 	model: Model;
 	filters: Filters;
 	matches: Match[];
-	openSource: (id: string) => void;
 } | null>(null);
 
 export function useCareer() {

@@ -1,20 +1,14 @@
 import { expect, test } from "@playwright/test";
-import { readFileSync } from "node:fs";
-import type { Dataset } from "../src/data";
+import { fixture as data } from "./fixture";
 
-const data: Dataset = JSON.parse(
-	readFileSync(
-		new URL("../../data/exports/career.json", import.meta.url),
-		"utf8",
-	),
-);
+test.beforeEach(async ({ page }) => {
+	await page.route("**/api/stats", (route) => route.fulfill({ json: data }));
+});
 const season = data.seasons.find((season) => season.label === "2018/19")!;
 const league = data.competitions.find(
 	(competition) => competition.name === "EFL League Two",
 )!;
-const haaland = data.players.find(
-	(player) => player.name === "Erling Braut Haaland",
-)!;
+const player = data.players.find((player) => player.name === "Test Forward")!;
 const shootout = data.matches.find(
 	(match) => match.played_on === "2019-02-14",
 )!;
@@ -31,11 +25,11 @@ test("overview preserves filters, preseason and mobile navigation", async ({
 		page.getByRole("heading", { name: "Career overview", exact: true }),
 	).toBeVisible();
 	await expect(
-		page.getByText("85 recorded matches", { exact: true }),
+		page.getByText("4 recorded matches", { exact: true }),
 	).toBeVisible();
 	await page.getByRole("checkbox", { name: "Include preseason" }).click();
 	await expect(
-		page.getByText("75 recorded matches", { exact: true }),
+		page.getByText("3 recorded matches", { exact: true }),
 	).toBeVisible();
 	await expect(
 		page.getByRole("checkbox", { name: "Include preseason" }),
@@ -44,7 +38,7 @@ test("overview preserves filters, preseason and mobile navigation", async ({
 		.getByRole("combobox", { name: "Competition", exact: true })
 		.selectOption(league.id);
 	await expect(
-		page.getByText("46 recorded matches", { exact: true }),
+		page.getByText("2 recorded matches", { exact: true }),
 	).toBeVisible();
 	await page.reload();
 	await expect(
@@ -69,10 +63,9 @@ test("overview preserves filters, preseason and mobile navigation", async ({
 		page.getByRole("heading", { name: "Career overview", exact: true }),
 	).toBeVisible();
 	await expect(page.locator(".recharts-surface").first()).toBeVisible();
-	await expect(page.locator(".evidence-preview img")).toHaveJSProperty(
-		"naturalWidth",
-		1366,
-	);
+	await expect(
+		page.getByRole("link", { name: "Source images", exact: true }),
+	).toHaveCount(0);
 	expect(
 		await page.evaluate(
 			() => document.documentElement.scrollWidth <= innerWidth,
@@ -86,7 +79,7 @@ test("overview preserves filters, preseason and mobile navigation", async ({
 	expect(errors).toEqual([]);
 });
 
-test("fixture search, score, player records and source evidence", async ({
+test("fixture search, score and player records work without screenshots", async ({
 	page,
 }, testInfo) => {
 	await page.goto("/#/matches");
@@ -108,18 +101,11 @@ test("fixture search, score, player records and source evidence", async ({
 		page.getByRole("heading", { name: "Passing", exact: true }),
 	).toBeVisible();
 	await page.getByRole("button", { name: "Close dialog" }).click();
-	await page
-		.locator(".match-meta")
-		.getByRole("button", { name: "View source screenshot" })
-		.first()
-		.click();
-	const dialog = page.getByRole("dialog");
-	await expect(dialog.locator(".source-full")).toHaveJSProperty(
-		"naturalWidth",
-		1366,
-	);
+	await expect(
+		page.getByRole("button", { name: "View source screenshot" }),
+	).toHaveCount(0);
 	await page.screenshot({
-		path: testInfo.outputPath("evidence.png"),
+		path: testInfo.outputPath("match.png"),
 		animations: "disabled",
 	});
 	await page.keyboard.press("Escape");
@@ -134,21 +120,21 @@ test("fixture search, score, player records and source evidence", async ({
 test("player totals and development remain distinct from match data", async ({
 	page,
 }, testInfo) => {
-	await page.goto(`/#/players/${haaland.id}?season=${season.id}`);
+	await page.goto(`/#/players/${player.id}?season=${season.id}`);
 	await expect(
-		page.getByRole("heading", { name: haaland.name, exact: true }),
+		page.getByRole("heading", { name: player.name, exact: true }),
 	).toBeVisible();
 	await expect(
 		page.locator(".kpi").filter({ hasText: "Goals" }).locator("strong"),
-	).toContainText("23");
+	).toContainText("2");
 	await page.getByRole("tab", { name: "Season totals" }).click();
-	await expect(page.locator("tbody tr")).toHaveCount(6);
+	await expect(page.locator("tbody tr")).toHaveCount(3);
 	const total = page
 		.locator("tbody tr")
 		.filter({ hasText: "All competitions" });
-	await expect(total).toContainText("52");
-	await expect(total).toContainText("23");
-	await expect(total).toContainText("13");
+	await expect(total).toContainText("3");
+	await expect(total).toContainText("2");
+	await expect(total).toContainText("1");
 	await page.getByRole("tab", { name: "Development" }).click();
 	await expect(
 		page.getByRole("heading", { name: "Recorded overall history" }),
@@ -162,7 +148,7 @@ test("player totals and development remain distinct from match data", async ({
 		animations: "disabled",
 	});
 	await page.getByRole("tab", { name: "Player record" }).click();
-	await expect(page.locator(".record-details")).toContainText(haaland.id);
+	await expect(page.locator(".record-details")).toContainText(player.id);
 });
 
 test("competitions preserve League Two points and preseason editions", async ({
@@ -177,12 +163,12 @@ test("competitions preserve League Two points and preseason editions", async ({
 			.locator(".kpi")
 			.filter({ hasText: "Points from results" })
 			.locator("strong"),
-	).toHaveText("83");
+	).toHaveText("4");
 	await page.goto("/#/competitions");
-	await expect(page.locator(".competition-card")).toHaveCount(7);
+	await expect(page.locator(".competition-card")).toHaveCount(3);
 	await expect(
 		page.locator(".competition-card").filter({ hasText: "Preseason" }),
-	).toHaveCount(2);
+	).toHaveCount(1);
 });
 
 test("verification exposes partial comparisons and the goal warning", async ({
@@ -194,8 +180,8 @@ test("verification exposes partial comparisons and the goal warning", async ({
 	).toBeVisible();
 	await page
 		.getByRole("textbox", { name: "Search reconciliation records" })
-		.fill("Aaron Ramsdale");
-	await expect(page.locator("tbody tr")).toHaveCount(6);
+		.fill("Test Goalkeeper");
+	await expect(page.locator("tbody tr")).toHaveCount(1);
 	await expect(
 		page.locator("tbody").getByText("Partial", { exact: true }).first(),
 	).toBeVisible();
@@ -206,7 +192,7 @@ test("verification exposes partial comparisons and the goal warning", async ({
 	await expect(page.locator(".warning-record")).toContainText("Portsmouth");
 	await page.getByRole("link", { name: "Open match" }).click();
 	await expect(page.locator(".notice.warning")).toContainText(
-		"Credited player goals: 2",
+		"Credited player goals: 0",
 	);
 });
 
@@ -219,24 +205,24 @@ test("all exported tables and full UUID records can be inspected", async ({
 	).toBeVisible();
 	await expect(
 		page.getByRole("combobox", { name: "Dataset table" }).locator("option"),
-	).toHaveCount(15);
+	).toHaveCount(12);
 	await page
 		.getByRole("combobox", { name: "Dataset table" })
 		.selectOption("players");
 	await page
 		.getByRole("textbox", { name: "Search players", exact: true })
-		.fill(haaland.id);
+		.fill(player.id);
 	await expect(page.locator("tbody tr")).toHaveCount(1);
 	await page.locator("tbody .text-link").click();
-	await expect(page.getByRole("dialog")).toContainText(haaland.id);
+	await expect(page.getByRole("dialog")).toContainText(player.id);
 	await page.keyboard.press("Escape");
 	await page
 		.getByRole("combobox", { name: "Dataset table" })
 		.selectOption("player_matches");
-	await expect(page.locator(".record-count")).toContainText("1,132");
+	await expect(page.locator(".record-count")).toContainText("5");
 	await expect(
 		page.getByRole("columnheader", { name: "Goals Conceded Basis" }),
-	).toBeAttached();
+	).not.toBeAttached();
 	expect(
 		await page.evaluate(
 			() => document.documentElement.scrollWidth <= innerWidth,
@@ -244,42 +230,33 @@ test("all exported tables and full UUID records can be inspected", async ({
 	).toBe(true);
 });
 
-test("career records and screenshot previews are accessible", async ({
+test("career records are available without an image archive", async ({
 	page,
 }) => {
 	await page.goto("/#/career");
-	await expect(page.locator(".transfer-record")).toHaveCount(2);
+	await expect(page.locator(".transfer-record")).toHaveCount(1);
 	await expect(
-		page.locator(".transfer-record").filter({ hasText: "Calvert-Lewin" }),
+		page.locator(".transfer-record").filter({ hasText: "Test Forward" }),
 	).toContainText("24 months");
-	await page.getByRole("tab", { name: "Honours & events (2)" }).click();
-	await expect(page.locator(".event-record")).toHaveCount(2);
-	await page.goto("/#/sources");
-	await page
-		.getByRole("textbox", { name: "Search screenshots" })
-		.fill("(1055)");
-	await expect(page.locator(".source-tile")).toHaveCount(1);
-	await expect(page.locator(".source-tile img")).toHaveJSProperty(
-		"naturalWidth",
-		1366,
-	);
-	await page.locator(".source-tile").click();
-	await expect(page.getByRole("dialog")).toContainText(
-		"Screenshot (1055).png",
-	);
+	await page.getByRole("tab", { name: "Honours & events (1)" }).click();
+	await expect(page.locator(".event-record")).toHaveCount(1);
+	await expect(
+		page.getByRole("link", { name: "Source images", exact: true }),
+	).toHaveCount(0);
 });
 
 test("download exports actual data and missing data can recover", async ({
 	page,
 }) => {
-	await page.route("**/data/career.json", (route) =>
+	await page.route("**/api/stats", (route) =>
 		route.fulfill({ status: 503, body: "Unavailable" }),
 	);
 	await page.goto("/");
 	await expect(page.getByRole("alert")).toContainText(
-		"Career export not found",
+		"Career data request failed (503)",
 	);
-	await page.unroute("**/data/career.json");
+	await page.unroute("**/api/stats");
+	await page.route("**/api/stats", (route) => route.fulfill({ json: data }));
 	await page.getByRole("button", { name: "Retry" }).click();
 	await expect(
 		page.getByRole("heading", { name: "Career overview", exact: true }),

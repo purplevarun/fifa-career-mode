@@ -2,11 +2,7 @@ import {
 	ArrowRight,
 	ArrowRightLeft,
 	Check,
-	ChevronLeft,
-	ChevronRight,
 	Download,
-	ImageIcon,
-	Search,
 	TriangleAlert,
 	Trophy,
 } from "lucide-react";
@@ -33,8 +29,6 @@ import {
 	Pill,
 	RecordDetails,
 	SectionHeading,
-	SourceButton,
-	SourceImage,
 } from "./ui";
 
 export function CareerRecords() {
@@ -83,7 +77,7 @@ export function CareerRecords() {
 									</Pill>
 									<span className="muted tiny">
 										{typeof transfer.effective_on ===
-										"string"
+											"string"
 											? dateLabel(transfer.effective_on)
 											: "Exact transfer date not recorded"}
 									</span>
@@ -102,14 +96,14 @@ export function CareerRecords() {
 								<p>
 									{transfer.from_club_id
 										? model.clubs.get(
-												String(transfer.from_club_id),
-											)?.name
+											String(transfer.from_club_id),
+										)?.name
 										: "Origin not recorded"}{" "}
 									<ArrowRight size={14} />{" "}
 									{transfer.to_club_id
 										? model.clubs.get(
-												String(transfer.to_club_id),
-											)?.name
+											String(transfer.to_club_id),
+										)?.name
 										: "Destination not recorded"}
 								</p>
 								<dl className="inline-facts">
@@ -140,9 +134,6 @@ export function CareerRecords() {
 								</dl>
 							</div>
 							<div className="transfer-actions">
-								<SourceButton
-									sourceId={String(transfer.source_id)}
-								/>
 								<button
 									className="button secondary"
 									onClick={() => setSelected(transfer)}
@@ -186,7 +177,6 @@ export function CareerRecords() {
 									</CareerLink>
 								)}
 							</div>
-							<SourceButton sourceId={String(event.source_id)} />
 							<button
 								className="button secondary"
 								onClick={() => setSelected(event)}
@@ -287,18 +277,12 @@ export function Audit() {
 				</Pill>
 			),
 		},
-		{
-			key: "source_id",
-			title: "",
-			sortable: false,
-			render: (row) => <SourceButton sourceId={row.source_id} />,
-		},
 	];
 	return (
 		<>
 			<PageHeading
 				title="Verification"
-				eyebrow="Evidence & reconciliation"
+				eyebrow="Coverage & reconciliation"
 			>
 				<IconButton
 					label="Download verification reports"
@@ -321,7 +305,7 @@ export function Audit() {
 					{
 						label: "Fixtures",
 						value: String(coverage.matches),
-						detail: `${model.data.match_sources.length} linked screenshots`,
+						detail: "Saved match records",
 					},
 					{
 						label: "Team records",
@@ -477,17 +461,6 @@ export function Audit() {
 								</div>
 							))}
 						</dl>
-						<SectionHeading title="Screenshot review states" />
-						<dl className="stats-list">
-							{Object.entries(
-								model.data.coverage.source_states,
-							).map(([state, count]) => (
-								<div key={state}>
-									<dt>{label(state)}</dt>
-									<dd>{count}</dd>
-								</div>
-							))}
-						</dl>
 					</section>
 				</div>
 			)}
@@ -561,9 +534,6 @@ const tableNames = [
 	"seasons",
 	"player_transfers",
 	"competition_events",
-	"source_images",
-	"match_sources",
-	"player_match_sources",
 ] as const;
 type TableName = (typeof tableNames)[number];
 export function Explorer() {
@@ -602,8 +572,6 @@ export function Explorer() {
 					</span>
 				);
 			if (index > 0 && typeof value === "string") {
-				if (key === "source_id")
-					return <SourceButton sourceId={value} text />;
 				if (key === "player_id")
 					return (
 						<CareerLink to={`/players/${value}`}>
@@ -621,8 +589,8 @@ export function Explorer() {
 				<span
 					className={
 						key === "id" ||
-						(key.endsWith("_id") && resolved === value) ||
-						key === "sha256"
+							(key.endsWith("_id") && resolved === value) ||
+							key === "sha256"
 							? "short-id"
 							: "raw-cell"
 					}
@@ -711,133 +679,6 @@ export function Explorer() {
 					</div>
 				</Modal>
 			)}
-		</>
-	);
-}
-
-export function Evidence() {
-	const { model, openSource } = useCareer();
-	const [query, setQuery] = useState(""),
-		[type, setType] = useState("all"),
-		[status, setStatus] = useState("all"),
-		[page, setPage] = useState(0);
-	const types = [
-		...new Set(
-			model.data.source_images.map((source) => source.screen_type),
-		),
-	].sort();
-	const sources = model.data.source_images
-		.filter(
-			(source) =>
-				(type === "all" || source.screen_type === type) &&
-				(status === "all" || source.status === status) &&
-				`${source.path} ${source.id}`
-					.toLowerCase()
-					.includes(query.toLowerCase()),
-		)
-		.sort((left, right) =>
-			left.path.localeCompare(right.path, undefined, { numeric: true }),
-		);
-	const pages = Math.max(1, Math.ceil(sources.length / 18)),
-		current = Math.min(page, pages - 1);
-	return (
-		<>
-			<PageHeading
-				title="Source images"
-				eyebrow="Original evidence archive"
-			>
-				<Pill>
-					{display(model.data.source_images.length)} screenshots
-				</Pill>
-			</PageHeading>
-			<div className="table-toolbar">
-				<label className="search-field">
-					<Search size={16} />
-					<input
-						aria-label="Search screenshots"
-						placeholder="Screenshot number or UUID"
-						value={query}
-						onChange={(event) => {
-							setQuery(event.target.value);
-							setPage(0);
-						}}
-					/>
-				</label>
-				<div className="table-tools">
-					<select
-						aria-label="Screenshot type"
-						value={type}
-						onChange={(event) => {
-							setType(event.target.value);
-							setPage(0);
-						}}
-					>
-						<option value="all">All screen types</option>
-						{types.map((type) => (
-							<option key={type} value={type}>
-								{label(type)}
-							</option>
-						))}
-					</select>
-					<select
-						aria-label="Source review status"
-						value={status}
-						onChange={(event) => {
-							setStatus(event.target.value);
-							setPage(0);
-						}}
-					>
-						<option value="all">All review states</option>
-						<option value="imported">Fully reviewed</option>
-						<option value="needs_review">Partial review</option>
-					</select>
-				</div>
-			</div>
-			<div className="source-grid">
-				{sources
-					.slice(current * 18, (current + 1) * 18)
-					.map((source) => (
-						<button
-							className="source-tile"
-							key={source.id}
-							onClick={() => openSource(source.id)}
-						>
-							<SourceImage source={source} />
-							<span className="source-caption">
-								<strong>{source.path.split("/").at(-1)}</strong>
-								<ImageIcon size={15} />
-								<small>{label(source.screen_type)}</small>
-								<span
-									className={`review-dot ${source.status === "imported" ? "complete" : ""}`}
-									title={label(source.status)}
-								/>
-							</span>
-						</button>
-					))}
-			</div>
-			{!sources.length && <Empty title="No matching screenshots" />}
-			<div className="pagination">
-				<span>{display(sources.length)} sources</span>
-				<div>
-					<IconButton
-						label="Previous screenshots"
-						disabled={current === 0}
-						onClick={() => setPage(current - 1)}
-					>
-						<ChevronLeft size={17} />
-					</IconButton>
-					<span>
-						{current + 1} / {pages}
-					</span>
-					<IconButton
-						label="Next screenshots"
-						disabled={current + 1 >= pages}
-						onClick={() => setPage(current + 1)}
-					>
-						<ChevronRight size={17} />
-					</IconButton>
-				</div>
-			</div>
 		</>
 	);
 }

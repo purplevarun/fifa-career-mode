@@ -1,5 +1,5 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { fixture as data } from "../tests/fixture";
 import {
 	createModel,
 	defaultFilters,
@@ -9,35 +9,27 @@ import {
 	summarize,
 } from "./data";
 
-const data = JSON.parse(
-	readFileSync(
-		new URL("../../data/exports/career.json", import.meta.url),
-		"utf8",
-	),
-);
 const model = createModel(data);
 describe("career data calculations", () => {
 	it("includes every fixture and preserves preseason filtering", () => {
-		expect(selectMatches(model, defaultFilters)).toHaveLength(85);
+		expect(selectMatches(model, defaultFilters)).toHaveLength(4);
 		expect(
 			selectMatches(model, { ...defaultFilters, preseason: false }),
-		).toHaveLength(75);
+		).toHaveLength(3);
 	});
 	it("uses unique appearances and keeps opponent records out of Notts totals", () => {
-		expect(selectPerformances(model, model.matches)).toHaveLength(1131);
-		expect(selectPerformances(model, model.matches, null)).toHaveLength(
-			1132,
-		);
+		expect(selectPerformances(model, model.matches)).toHaveLength(4);
+		expect(selectPerformances(model, model.matches, null)).toHaveLength(5);
 	});
-	it("reconciles the complete League Two season", () => {
+	it("calculates league points separately from cups and preseason", () => {
 		const league = model.data.competitions.find(
 			(competition) => competition.name === "EFL League Two",
 		)!;
 		const summary = summarize(
 			selectMatches(model, { ...defaultFilters, competition: league.id }),
 		);
-		expect(summary.played).toBe(46);
-		expect(summary.leaguePoints).toBe(83);
+		expect(summary.played).toBe(2);
+		expect(summary.leaguePoints).toBe(4);
 	});
 	it("does not count shootout goals as match goals or draws as wins", () => {
 		const match = model.matches.find(
@@ -59,7 +51,7 @@ describe("career data calculations", () => {
 			total: 2,
 		});
 		const goalkeeper = model.data.players.find(
-			(player) => player.name === "Aaron Ramsdale",
+			(player) => player.name === "Test Goalkeeper",
 		)!;
 		expect(
 			metric(

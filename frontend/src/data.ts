@@ -52,21 +52,12 @@ export interface Snapshot extends Entity {
 	player_id: string;
 	club_id: string | null;
 	season_id: string;
-	source_id: string;
 	match_id: string | null;
 	overall: number | null;
 	displayed_position: string | null;
 	snapshot_kind: string;
 	observed_on: string | null;
 	date_precision: string;
-	date_basis: string;
-}
-export interface Source extends Entity {
-	path: string;
-	sha256: string;
-	screen_type: string;
-	status: string;
-	available: boolean;
 }
 export interface MetricComparison {
 	observed: number | null;
@@ -84,7 +75,6 @@ export interface Comparison extends Row {
 	season: string;
 	competition: string | null;
 	scope: string;
-	source_id: string;
 	result: string;
 	metrics: Record<string, MetricComparison>;
 }
@@ -103,18 +93,13 @@ export interface Dataset {
 	player_competition_snapshots: Entity[];
 	player_transfers: Entity[];
 	competition_events: Entity[];
-	match_sources: { match_id: string; source_id: string }[];
-	player_match_sources: { player_match_id: string; source_id: string }[];
-	source_images: Source[];
 	coverage: {
-		source_states: Record<string, number>;
 		records: Record<string, number>;
 	};
 	match_coverage: {
 		summary: Row;
 		warnings: Row[];
 		player_field_availability: Row;
-		sources: Row;
 	};
 	season_reconciliation: {
 		summary: Row;
@@ -142,7 +127,6 @@ export interface Model {
 	competitions: Map<string, Competition>;
 	seasons: Map<string, Season>;
 	editions: Map<string, Edition>;
-	sources: Map<string, Source>;
 	matches: Match[];
 	matchById: Map<string, Match>;
 }
@@ -176,26 +160,20 @@ export function createModel(input: unknown): Model {
 		"player_competition_snapshots",
 		"player_transfers",
 		"competition_events",
-		"match_sources",
-		"player_match_sources",
-		"source_images",
 	] as const;
 	if (
 		data.schema_version !== 3 ||
 		tables.some((table) => !Array.isArray(data[table]))
 	)
-		throw new Error(
-			"This app needs a schema-version 3 career export. Run npm run sync-data.",
-		);
+		throw new Error("The local stats use an unsupported schema-version.");
 	const notts = data.clubs.find((club) => club.name === "Notts County");
-	if (!notts)
+	if (!notts && data.matches.length)
 		throw new Error("Notts County is missing from the career export.");
 	const clubs = index(data.clubs),
 		players = index(data.players),
 		competitions = index(data.competitions);
 	const seasons = index(data.seasons),
-		editions = index(data.competition_seasons),
-		sources = index(data.source_images);
+		editions = index(data.competition_seasons);
 	const matches: Match[] = data.matches
 		.map((fixture): Match => {
 			const edition = editions.get(fixture.competition_season_id);
@@ -206,7 +184,7 @@ export function createModel(input: unknown): Model {
 				away = clubs.get(fixture.away_club_id)?.name;
 			if (!competition || !season || !home || !away)
 				throw new Error(`Broken fixture relationship: ${fixture.id}`);
-			const isHome = fixture.home_club_id === notts.id;
+			const isHome = fixture.home_club_id === notts?.id;
 			const goalsFor = isHome ? fixture.home_goals : fixture.away_goals;
 			const goalsAgainst = isHome
 				? fixture.away_goals
@@ -250,13 +228,12 @@ export function createModel(input: unknown): Model {
 		);
 	return {
 		data,
-		nottsId: notts.id,
+		nottsId: notts?.id ?? "",
 		clubs,
 		players,
 		competitions,
 		seasons,
 		editions,
-		sources,
 		matches,
 		matchById: index(matches),
 	};
@@ -368,9 +345,6 @@ export function playerSummary(
 		snapshots,
 	};
 }
-export function sourceUrl(sourceId: string) {
-	return `${import.meta.env.BASE_URL}evidence/${encodeURIComponent(sourceId)}.webp`;
-}
 export function referenceLabel(
 	model: Model,
 	field: string,
@@ -394,8 +368,6 @@ export function referenceLabel(
 			? `${match.played_on} ${match.home} ${match.home_goals ?? "-"}-${match.away_goals ?? "-"} ${match.away}`
 			: value;
 	}
-	if (field === "source_id")
-		return model.sources.get(value)?.path.split("/").at(-1) ?? value;
 	return value;
 }
 export function display(value: unknown, digits = 0): string {

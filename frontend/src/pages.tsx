@@ -2,7 +2,6 @@ import {
 	ArrowLeft,
 	ArrowRight,
 	CalendarDays,
-	ImageIcon,
 	MapPin,
 	Shield,
 	Trophy,
@@ -34,8 +33,6 @@ import {
 	RecordDetails,
 	Result,
 	SectionHeading,
-	SourceButton,
-	SourceImage,
 	StatValue,
 } from "./ui";
 
@@ -62,7 +59,6 @@ export function MatchTable({
 	matches: Match[];
 	compact?: boolean;
 }) {
-	const { model } = useCareer();
 	const columns: Column<Match>[] = [
 		{
 			key: "played_on",
@@ -120,19 +116,6 @@ export function MatchTable({
 				</div>
 			),
 		},
-		{
-			key: "source",
-			title: "",
-			sortable: false,
-			render: (match) => {
-				const source = model.data.match_sources.find(
-					(source) => source.match_id === match.id,
-				);
-				return source ? (
-					<SourceButton sourceId={source.source_id} />
-				) : null;
-			},
-		},
 	];
 	if (compact)
 		return (
@@ -178,7 +161,7 @@ export function MatchTable({
 }
 
 export function Overview() {
-	const { model, matches, openSource } = useCareer();
+	const { model, matches } = useCareer();
 	const summary = summarize(matches);
 	const leaders = model.data.players
 		.map((player) => playerSummary(model, player, matches))
@@ -188,11 +171,6 @@ export function Overview() {
 		)
 		.slice(0, 6);
 	const latest = matches.at(-1);
-	const sourceId =
-		latest &&
-		model.data.match_sources.find((source) => source.match_id === latest.id)
-			?.source_id;
-	const source = sourceId && model.sources.get(sourceId);
 	return (
 		<>
 			<PageHeading
@@ -291,26 +269,12 @@ export function Overview() {
 							</SectionHeading>
 							<MatchTable matches={matches} compact />
 						</section>
-						<section className="latest-evidence">
+						<section className="latest-match">
 							<SectionHeading title="Latest match">
 								<span className="tiny muted">
 									{latest?.competition.name}
 								</span>
 							</SectionHeading>
-							{source && (
-								<button
-									className="evidence-preview"
-									onClick={() => openSource(source.id)}
-									aria-label="View latest match screenshot"
-								>
-									<SourceImage source={source} />
-									<span>
-										<ImageIcon size={15} />
-										{source.path.split("/").at(-1)}
-										<ArrowRight size={15} />
-									</span>
-								</button>
-							)}
 							{latest && (
 								<div className="latest-caption">
 									<CareerLink to={`/matches/${latest.id}`}>
@@ -385,9 +349,6 @@ export function PerformanceDialog({
 }) {
 	const { model } = useCareer();
 	const match = model.matchById.get(performance.match_id);
-	const sources = model.data.player_match_sources.filter(
-		(source) => source.player_match_id === performance.id,
-	);
 	return (
 		<Modal
 			title={
@@ -447,15 +408,6 @@ export function PerformanceDialog({
 							</dl>
 						</section>
 					))}
-			</div>
-			<div className="source-links">
-				{sources.map((source) => (
-					<SourceButton
-						key={source.source_id}
-						sourceId={source.source_id}
-						text
-					/>
-				))}
 			</div>
 			<details className="metadata">
 				<summary>Record metadata</summary>
@@ -590,15 +542,6 @@ export function MatchDetail() {
 					{dateLabel(match.played_on)}
 				</span>
 				<div className="grow" />
-				{model.data.match_sources
-					.filter((source) => source.match_id === match.id)
-					.map((source) => (
-						<SourceButton
-							key={source.source_id}
-							sourceId={source.source_id}
-							text
-						/>
-					))}
 			</div>
 			{warnings.map((warning, index) => (
 				<div className="notice warning" key={index}>
@@ -1054,7 +997,7 @@ export function PlayerDetail() {
 										{row.observed_on
 											? dateLabel(row.observed_on)
 											: model.seasons.get(row.season_id)
-													?.label}
+												?.label}
 										<small className="muted">
 											{row.date_precision === "season"
 												? "Exact date not recorded"
@@ -1071,7 +1014,7 @@ export function PlayerDetail() {
 										tone={
 											row.snapshot_kind ===
 												"season_end" ||
-											row.snapshot_kind === "season_start"
+												row.snapshot_kind === "season_start"
 												? "positive"
 												: "neutral"
 										}
@@ -1083,13 +1026,6 @@ export function PlayerDetail() {
 							{ key: "overall", title: "OVR", numeric: true },
 							{ key: "age", title: "Age", numeric: true },
 							{ key: "displayed_position", title: "Positions" },
-							{
-								key: "source_id",
-								title: "Evidence",
-								render: (row) => (
-									<SourceButton sourceId={row.source_id} />
-								),
-							},
 						]}
 						defaultSort={{ key: "observed_on", desc: true }}
 					/>
@@ -1121,12 +1057,12 @@ export function PlayerDetail() {
 											{row.scope === "all_competitions"
 												? "All competitions"
 												: model.competitions.get(
-														model.editions.get(
-															String(
-																row.competition_season_id,
-															),
-														)?.competition_id ?? "",
-													)?.name}
+													model.editions.get(
+														String(
+															row.competition_season_id,
+														),
+													)?.competition_id ?? "",
+												)?.name}
 										</strong>
 										<small className="muted">
 											{
@@ -1164,15 +1100,6 @@ export function PlayerDetail() {
 								title: "Avg",
 								numeric: true,
 								render: (row) => display(row.average_rating, 2),
-							},
-							{
-								key: "source_id",
-								title: "Evidence",
-								render: (row) => (
-									<SourceButton
-										sourceId={String(row.source_id)}
-									/>
-								),
 							},
 						]}
 					/>
@@ -1215,8 +1142,8 @@ export function Competitions() {
 			<div className="competition-grid">
 				{competitions.map((competition) => {
 					const fixtures = matches.filter(
-							(match) => match.competition.id === competition.id,
-						),
+						(match) => match.competition.id === competition.id,
+					),
 						summary = summarize(fixtures);
 					return (
 						<CareerLink

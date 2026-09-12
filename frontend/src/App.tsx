@@ -5,7 +5,6 @@ import {
 	ChartNoAxesCombined,
 	Database,
 	Download,
-	Images,
 	LoaderCircle,
 	Menu,
 	RefreshCw,
@@ -26,10 +25,11 @@ import {
 	useSearchParams,
 } from "react-router-dom";
 import "./App.css";
-import { Audit, CareerRecords, Evidence, Explorer } from "./archive";
+import { Audit, CareerRecords, Explorer } from "./archive";
 import { CareerContext } from "./context";
 import type { Filters, Model } from "./data";
 import { createModel, dateLabel, downloadJson, selectMatches } from "./data";
+import { loadCareerDataset } from "./loadData";
 import {
 	CompetitionDetail,
 	Competitions,
@@ -40,7 +40,7 @@ import {
 	Players,
 	UnknownPage,
 } from "./pages";
-import { IconButton, SourceModal } from "./ui";
+import { IconButton } from "./ui";
 function Shell({
 	model,
 	reload,
@@ -53,7 +53,6 @@ function Shell({
 	const [parameters, setParameters] = useSearchParams();
 	const location = useLocation();
 	const [mobileMenu, setMobileMenu] = useState(false);
-	const [sourceId, setSourceId] = useState<string | null>(null);
 	const filters: Filters = {
 		season: model.seasons.has(parameters.get("season") ?? "")
 			? parameters.get("season")!
@@ -64,7 +63,7 @@ function Shell({
 		preseason: parameters.get("preseason") !== "false",
 	};
 	const matches = selectMatches(model, filters);
-	const archiveWide = ["/career", "/audit", "/data", "/sources"].includes(
+	const archiveWide = ["/career", "/audit", "/data"].includes(
 		location.pathname,
 	);
 	const navigation = [
@@ -74,7 +73,6 @@ function Shell({
 		{ path: "/competitions", label: "Competitions", icon: Trophy },
 		{ path: "/career", label: "Career records", icon: ArrowRightLeft },
 		{ path: "/audit", label: "Verification", icon: ShieldCheck },
-		{ path: "/sources", label: "Source images", icon: Images },
 		{ path: "/data", label: "Data explorer", icon: Database },
 	];
 	function changeFilters(next: Partial<Filters>) {
@@ -88,11 +86,8 @@ function Shell({
 		else query.set("preseason", "false");
 		setParameters(query);
 	}
-	const source = sourceId && model.sources.get(sourceId);
 	return (
-		<CareerContext
-			value={{ model, filters, matches, openSource: setSourceId }}
-		>
+		<CareerContext value={{ model, filters, matches }}>
 			<a
 				href="#main-content"
 				className="skip-link"
@@ -226,8 +221,8 @@ function Shell({
 								<Database size={15} />
 								<span>Full archive</span>
 								<span className="muted">
-									{model.data.source_images.length.toLocaleString()}{" "}
-									source images
+									{model.matches.length.toLocaleString()}{" "}
+									matches
 								</span>
 							</div>
 						) : (
@@ -335,7 +330,6 @@ function Shell({
 							/>
 							<Route path="/career" element={<CareerRecords />} />
 							<Route path="/audit" element={<Audit />} />
-							<Route path="/sources" element={<Evidence />} />
 							<Route path="/data" element={<Explorer />} />
 							<Route path="*" element={<UnknownPage />} />
 						</Routes>
@@ -343,7 +337,7 @@ function Shell({
 					<footer className="app-footer">
 						<span>NOTTS COUNTY / CAREER DATA</span>
 						<span>
-							Exported{" "}
+							Loaded{" "}
 							{new Date(model.data.generated_at).toLocaleString(
 								"en-GB",
 							)}
@@ -351,13 +345,6 @@ function Shell({
 					</footer>
 				</div>
 			</div>
-			{source && (
-				<SourceModal
-					key={source.id}
-					source={source}
-					onClose={() => setSourceId(null)}
-				/>
-			)}
 		</CareerContext>
 	);
 }
@@ -372,18 +359,9 @@ function App() {
 	}
 	useEffect(() => {
 		const controller = new AbortController();
-		fetch(`${import.meta.env.BASE_URL}data/career.json`, {
-			signal: controller.signal,
-			cache: "no-store",
-		})
-			.then((response) => {
-				if (!response.ok)
-					throw new Error(
-						"Career export not found. Run npm run sync-data in the web folder.",
-					);
-				return response.json();
-			})
+		loadCareerDataset(fetch, "/api/stats", controller.signal)
 			.then((data) => {
+				if (controller.signal.aborted) return;
 				setModel(createModel(data));
 				setError(null);
 			})
@@ -392,7 +370,7 @@ function App() {
 					setError(
 						reason instanceof Error
 							? reason.message
-							: "Could not load the career export.",
+							: "Could not load career data.",
 					);
 			})
 			.finally(() => {

@@ -2,7 +2,7 @@
 set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-WEB_DIR="$ROOT_DIR/web"
+FRONTEND_DIR="$ROOT_DIR/frontend"
 cd "$ROOT_DIR"
 
 usage() {
@@ -10,20 +10,19 @@ usage() {
 Usage: ./run <command> [args...]
 
 Commands:
-  process      Scan screenshots and save new OCR results to local SQLite
-  review       Prepare OCR results for visual review
-  approve      Save reviewed records to the local database
-  status       Show saved stats and processing state
-  backup       Create a local SQLite backup
-  format       Format web source and project documentation with Prettier
-  dev          Start the Vite development server
-  build        Build the production dashboard
-  preview      Preview the production build
-  test         Run frontend data tests
+  process      Scan raw_screenshots/ and save new OCR results to local SQLite
+  approve      Save visually checked OCR records to the stats database
+  review       Create a review file from existing OCR results
+  status       Show saved stats and pending processing
+  backup       Back up the local SQLite database to a new file
+  dev          Start the local dashboard
+  build        Build the local dashboard
+  preview      Open the built dashboard with the local SQLite endpoint
+  test         Run Python and frontend tests
   e2e          Run Playwright browser tests
   lint         Run Oxlint
-  check        Run format check, lint, tests, and build
-  sync-data    Refresh the JSON export and screenshot previews
+  check        Run tests, lint, and build
+  format       Format frontend files and project documentation
 EOF
 }
 
@@ -31,27 +30,28 @@ command_name=${1:-}
 shift || true
 
 case "$command_name" in
-  process|approve|review|status|backup|inventory|validate|report|reconcile|export)
-    exec python3 -m processing "$command_name" "$@"
-    ;;
   format)
-    exec npm --prefix "$WEB_DIR" exec -- prettier --write \
-      "$WEB_DIR/package.json" "$WEB_DIR/*.json" "$WEB_DIR/*.ts" \
-      "$WEB_DIR/src" "$WEB_DIR/scripts" "$WEB_DIR/tests" "$ROOT_DIR/DATA_PROCESS.md"
+    exec "$FRONTEND_DIR/node_modules/.bin/prettier" --write \
+      "$FRONTEND_DIR/package.json" "$FRONTEND_DIR/*.ts" \
+      "$FRONTEND_DIR/src" "$FRONTEND_DIR/tests" "$ROOT_DIR/DATA_PROCESS.md"
     ;;
-  dev|build|preview|test|e2e|lint)
-    exec npm --prefix "$WEB_DIR" run "$command_name" -- "$@"
+  dev|build|preview|lint)
+    exec npm --prefix "$FRONTEND_DIR" run "$command_name" -- "$@"
+    ;;
+  e2e)
+    exec npm --prefix "$FRONTEND_DIR" run test:e2e -- "$@"
+    ;;
+  test)
+    python3 -W error::ResourceWarning -m unittest discover -s processing/tests -q
+    exec npm --prefix "$FRONTEND_DIR" test -- "$@"
     ;;
   check)
-    npm --prefix "$WEB_DIR" exec -- prettier --check \
-      "$WEB_DIR/package.json" "$WEB_DIR/*.json" "$WEB_DIR/*.ts" \
-      "$WEB_DIR/src" "$WEB_DIR/scripts" "$WEB_DIR/tests" "$ROOT_DIR/DATA_PROCESS.md"
-    npm --prefix "$WEB_DIR" run lint
-    npm --prefix "$WEB_DIR" test
-    exec npm --prefix "$WEB_DIR" run build
+    "$ROOT_DIR/run" test
+    npm --prefix "$FRONTEND_DIR" run lint
+    exec npm --prefix "$FRONTEND_DIR" run build
     ;;
-  sync-data)
-    exec npm --prefix "$WEB_DIR" run sync-data -- "$@"
+  process|approve|review|status|backup|inventory|validate|report|reconcile|export)
+    exec python3 -m processing "$command_name" "$@"
     ;;
   ''|-h|--help|help)
     usage
