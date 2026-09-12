@@ -9,7 +9,11 @@ __MACOSX
 .venv/
 __pycache__/
 *.py[cod]
-data/*.sqlite-*
-data/exports/
-data/review/
-data/backups/
+*.sqlite
+*.sqlite-*
+processing/data/
+
+.env*
+
+raw_screenshots/*
+!raw_screenshots/.gitkeep
