@@ -122,14 +122,15 @@ def make_sheets(connection, root, output, mode="matches", start=0, end=99999):
 def main():
     parser = argparse.ArgumentParser(description="Render original image regions for batch visual review.")
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
-    parser.add_argument("--output", type=Path, default=Path("data/review/sheets"))
+    parser.add_argument("--output", type=Path)
     parser.add_argument("--mode", choices=("matches", "players", "teams", "squads"), default="matches")
     parser.add_argument("--start", type=int, default=0)
     parser.add_argument("--end", type=int, default=99999)
     arguments = parser.parse_args()
-    connection = connect(arguments.root / "data/career.sqlite")
+    data_directory = arguments.root / "processing" / "data"
+    connection = connect(data_directory / "career.sqlite")
     try:
-        for result in make_sheets(connection, arguments.root, arguments.output,
+        for result in make_sheets(connection, arguments.root, arguments.output or data_directory / "review" / "sheets",
                                   arguments.mode, arguments.start, arguments.end):
             print(result)
     finally:

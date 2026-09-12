@@ -1,19 +1,21 @@
 import copy
+import io
 import json
 import shutil
 import sqlite3
 import tempfile
 import unittest
-from contextlib import closing
+from contextlib import closing, redirect_stdout
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 from PIL import Image
 
-from career_data.database import connect, coverage_report, insert_entity, inventory, status, validate_database
-from career_data.pipeline import approve_review, backup_database, ensure_club, ensure_edition, ensure_season, export_data, extract_pending, make_review
-from career_data.batch_review import fixture_contexts, prepare_player_cores
-from career_data.identifiers import is_uuid, new_id
-from career_data.reconciliation import reconcile_totals
+from processing.database import connect, coverage_report, insert_entity, inventory, status, validate_database
+from processing.pipeline import approve_review, backup_database, dashboard_data, ensure_club, ensure_edition, ensure_season, export_data, extract_pending, make_review
+from processing.batch_review import fixture_contexts, prepare_player_cores
+from processing.identifiers import is_uuid, new_id
+from processing.reconciliation import reconcile_totals
 
 
 class DatabaseTestCase(unittest.TestCase):
@@ -21,7 +23,7 @@ class DatabaseTestCase(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
-        self.raw = self.root / "raw_data"
+        self.raw = self.root / "raw_screenshots"
         self.raw.mkdir()
         self.connection = connect(self.root / "career.sqlite")
         self.addCleanup(self.connection.close)
@@ -72,6 +74,28 @@ class DatabaseTests(DatabaseTestCase):
         self.assertEqual(report["summary"]["minimum_player_records_per_match"], 0)
         self.assertEqual(report["warnings"], [])
 
+    def test_dashboard_contains_stats_without_screenshot_references(self):
+        self.create_image()
+        inventory(self.connection, self.root)
+        source_id = self.connection.execute("SELECT id FROM source_images").fetchone()[0]
+        match_id = self.create_match()
+        player_id = self.create_player()
+        insert_entity(self.connection, "player_snapshots", {
+            "player_id": player_id, "season_id": self.season_id, "source_id": source_id,
+            "snapshot_kind": "first_observed", "date_precision": "season",
+            "date_basis": "Screenshot (73).png", "overall": 62,
+        })
+        dataset = dashboard_data(self.connection)
+        self.assertEqual(dataset["matches"][0]["id"], match_id)
+        self.assertEqual(dataset["player_snapshots"][0]["overall"], 62)
+        for field in ("source_images", "match_sources", "player_match_sources"):
+            self.assertNotIn(field, dataset)
+        self.assertNotIn("sources", dataset["match_coverage"])
+        serialized = json.dumps(dataset)
+        self.assertNotIn(source_id, serialized)
+        self.assertNotIn("Screenshot (73).png", serialized)
+        self.assertNotIn('"source_id"', serialized)
+
     def test_inventory_is_content_based_and_repeatable(self):
         original = self.create_image()
         shutil.copyfile(original, self.raw / "Screenshot (74).png")
@@ -95,6 +119,34 @@ class DatabaseTests(DatabaseTestCase):
         inventory(self.connection, self.root)
         self.assertEqual(status(self.connection)["source_images"], 2)
         self.assertEqual(status(self.connection)["present_paths"], 1)
+
+    def test_deleted_screenshots_and_reused_names_preserve_saved_matches(self):
+        original = self.create_image()
+        original_bytes = original.read_bytes()
+        self.raw = self.raw.rename(self.root / "raw_screenshots")
+        original = self.raw / original.name
+        inventory(self.connection, self.root)
+        source_id = self.connection.execute("SELECT id FROM source_images").fetchone()[0]
+        match_id = self.create_match()
+        self.connection.execute("INSERT INTO match_sources VALUES (?, ?)", (match_id, source_id))
+        self.connection.execute("UPDATE source_images SET status = 'imported'")
+        self.connection.commit()
+
+        original.unlink()
+        self.assertEqual(inventory(self.connection, self.root)["new_images"], 0)
+        self.assertEqual(status(self.connection)["present_paths"], 0)
+        self.assertEqual(status(self.connection)["records"]["matches"], 1)
+
+        Image.new("RGB", (40, 20), "black").save(original)
+        self.assertEqual(inventory(self.connection, self.root)["new_images"], 1)
+        self.assertEqual(status(self.connection)["source_images"], 2)
+        self.assertEqual(self.connection.execute("SELECT source_id FROM match_sources").fetchone()[0], source_id)
+
+        original.unlink()
+        (self.raw / "renamed.png").write_bytes(original_bytes)
+        self.assertEqual(inventory(self.connection, self.root)["new_images"], 0)
+        self.assertEqual(status(self.connection)["source_states"], {"imported": 1, "inventoried": 1})
+        self.assertEqual(validate_database(self.connection), [])
 
     def test_corrupt_image_is_reported(self):
         (self.raw / "broken.png").write_bytes(b"not an image")
@@ -270,6 +322,13 @@ class ImportTests(DatabaseTestCase):
         review = make_review(self.connection, {73})
         self.assertEqual(review["sources"][0]["records"][0]["home_goals"], 1)
 
+
+
+
+
+
+
+
     def test_export_and_backup_preserve_canonical_data(self):
         self.approved_match()
         output = self.root / "exports" / "career.json"
@@ -317,7 +376,7 @@ class ImportTests(DatabaseTestCase):
         output = self.root / "career.json"
         export_data(self.connection, output)
         source = json.loads(output.read_text())["source_images"][0]
-        self.assertEqual(source["path"], "raw_data/Screenshot (74).png")
+        self.assertEqual(source["path"], "raw_screenshots/Screenshot (74).png")
         self.assertIs(source["available"], True)
 
     def test_non_match_records_are_repeatable_and_totals_keep_their_scope(self):
@@ -423,6 +482,83 @@ class ImportTests(DatabaseTestCase):
         self.assertEqual(report["competitions"][0]["draws"], 0)
         self.assertIsNone(report["matches"][0]["goal_difference"])
         self.assertIn("missing_match_score", [warning["code"] for warning in report["warnings"]])
+
+
+class CommandTests(DatabaseTestCase):
+    def setUp(self):
+        super().setUp()
+        self.record = {
+            "type": "match", "season": "2018/19", "competition": "European International Cup",
+            "played_on": "2018-07-04", "home_club": "Notts County", "away_club": "Dundee FC",
+            "home_goals": 1, "away_goals": 1,
+        }
+        self.extractor = Mock()
+        self.extractor.extract.return_value = {
+            "screen_type": "match_facts", "records": [self.record], "evidence": {}, "issues": [],
+        }
+        replacement = patch("processing.extraction.ScreenshotExtractor", return_value=self.extractor)
+        replacement.start()
+        self.addCleanup(replacement.stop)
+
+    def command(self, *arguments):
+        from processing.__main__ import main
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            result = main(["--root", str(self.root), "--db", str(self.root / "career.sqlite"), *map(str, arguments)])
+        self.assertEqual(result, 0)
+        text = output.getvalue()
+        return json.loads(text[text.index("{"):])
+
+    def test_process_approve_and_dashboard_use_one_sqlite_database(self):
+        self.create_image()
+        processed = self.command("process")
+        self.assertEqual(processed["extraction"]["extracted"], 1)
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM matches").fetchone()[0], 0)
+        review_path = Path(processed["review_file"])
+        self.assertTrue(review_path.is_file())
+        self.command("approve", review_path, "--note", "Visually checked")
+        self.assertEqual(len(self.command("data")["matches"]), 1)
+        repeat = self.command("process")
+        self.assertEqual(repeat["extraction"]["extracted"], 0)
+        self.assertNotIn("review_file", repeat)
+        self.extractor.extract.assert_called_once()
+        self.assertNotIn("source_images", self.command("data"))
+
+    def test_delete_and_replace_screenshot_never_loses_saved_stats(self):
+        original = self.create_image()
+        original_bytes = original.read_bytes()
+        first = self.command("process")
+        self.command("approve", first["review_file"], "--note", "First match checked")
+        original.unlink()
+        self.assertEqual(self.command("process")["extraction"]["extracted"], 0)
+        self.assertEqual(len(self.command("data")["matches"]), 1)
+
+        self.record["played_on"] = "2018-07-05"
+        self.create_image(color="black")
+        second = self.command("process")
+        self.assertEqual(second["inventory"]["new_images"], 1)
+        self.command("approve", second["review_file"], "--note", "Second match checked")
+        self.assertEqual(len(self.command("data")["matches"]), 2)
+        (self.raw / "old-image-renamed.png").write_bytes(original_bytes)
+        self.assertEqual(self.command("process")["extraction"]["extracted"], 0)
+        self.assertEqual(self.extractor.extract.call_count, 2)
+
+    def test_process_has_no_silent_twenty_image_limit_or_image_copies(self):
+        for sequence in range(21):
+            self.create_image(f"Screenshot ({sequence}).png", color=(sequence * 10, 0, 0))
+        result = self.command("process")
+        self.assertEqual(result["extraction"]["extracted"], 21)
+        self.assertEqual(result["extraction"]["remaining"], 0)
+        self.assertEqual(len(list(self.root.rglob("*.png"))), 21)
+
+    def test_dashboard_read_does_not_create_a_missing_database(self):
+        from processing.__main__ import main
+
+        missing = self.root / "missing.sqlite"
+        with self.assertRaisesRegex(ValueError, "No local stats database"):
+            main(["--db", str(missing), "data"])
+        self.assertFalse(missing.exists())
 
 
 class ReconciliationTests(DatabaseTestCase):

@@ -43,13 +43,15 @@ def parse_sequences(value):
     return sequences
 
 
-def select_sources(connection, sequences=None):
+def select_sources(connection, sequences=None, source_ids=None):
     paths = connection.execute(
         "SELECT path, sequence, source_id FROM source_paths WHERE present = 1 ORDER BY sequence, path"
     ).fetchall()
     selected = {}
     found = set()
     for path in paths:
+        if source_ids is not None and path["source_id"] not in source_ids:
+            continue
         if sequences is not None and path["sequence"] not in sequences:
             continue
         found.add(path["sequence"])
@@ -61,11 +63,11 @@ def select_sources(connection, sequences=None):
     return list(selected.values())
 
 
-def extract_pending(connection, root, sequences=None, limit=20, reextract=False, extractor=None, progress=None):
-    if limit < 1:
+def extract_pending(connection, root, sequences=None, limit=None, reextract=False, extractor=None, progress=None):
+    if limit is not None and limit < 1:
         raise ValueError("The extraction limit must be at least one")
     sources = select_sources(connection, sequences)
-    counts = {"extracted": 0, "skipped": 0, "errors": 0, "remaining": 0}
+    counts = {"extracted": 0, "skipped": 0, "errors": 0, "remaining": 0, "processed_source_ids": []}
     attempted = 0
     for source in sources:
         existing = connection.execute("SELECT 1 FROM extractions WHERE source_id = ?", (source["id"],)).fetchone()
@@ -75,7 +77,7 @@ def extract_pending(connection, root, sequences=None, limit=20, reextract=False,
         if source["width"] is None or source["height"] is None:
             counts["errors"] += 1
             continue
-        if attempted >= limit:
+        if limit is not None and attempted >= limit:
             counts["remaining"] += 1
             continue
         attempted += 1
@@ -105,6 +107,7 @@ def extract_pending(connection, root, sequences=None, limit=20, reextract=False,
                     (result["screen_type"], source["id"]),
                 )
             counts["extracted"] += 1
+            counts["processed_source_ids"].append(source["id"])
         except Exception as exception:
             with connection:
                 connection.execute(
@@ -118,11 +121,13 @@ def extract_pending(connection, root, sequences=None, limit=20, reextract=False,
     return counts
 
 
-def make_review(connection, sequences=None, match_id=None):
+
+
+def make_review(connection, sequences=None, match_id=None, source_ids=None):
     if match_id is not None and (not is_uuid(match_id) or not connection.execute("SELECT 1 FROM matches WHERE id = ?", (match_id,)).fetchone()):
         raise ValueError(f"Unknown match ID: {match_id}")
     sources = []
-    for source in select_sources(connection, sequences):
+    for source in select_sources(connection, sequences, source_ids):
         extraction = connection.execute("SELECT * FROM extractions WHERE source_id = ?", (source["id"],)).fetchone()
         if not extraction:
             continue
@@ -453,7 +458,7 @@ def write_json(path, value, overwrite=True):
             temporary_path.unlink()
 
 
-def export_data(connection, output_path):
+def build_dataset(connection):
     errors = validate_database(connection)
     if errors:
         raise ValueError("Cannot export an invalid database: " + "; ".join(errors))
@@ -477,6 +482,29 @@ def export_data(connection, output_path):
     )]
     for source in data["source_images"]:
         source["available"] = bool(source["available"])
+    return data
+
+
+def dashboard_data(connection):
+    data = build_dataset(connection)
+    for field in ("source_images", "match_sources", "player_match_sources"):
+        data.pop(field)
+    data["coverage"] = {"records": data["coverage"]["records"]}
+    data["match_coverage"].pop("sources", None)
+
+    def public_value(value):
+        if isinstance(value, list):
+            return [public_value(item) for item in value]
+        if isinstance(value, dict):
+            return {key: public_value(item) for key, item in value.items()
+                    if key not in {"source_id", "match_source_id", "date_basis", "goals_conceded_basis"}}
+        return value
+
+    return public_value(data)
+
+
+def export_data(connection, output_path):
+    data = build_dataset(connection)
     write_json(output_path, data)
     return {"output": str(output_path), "matches": len(data["matches"]),
             "player_matches": len(data["player_matches"]), "player_snapshots": len(data["player_snapshots"])}

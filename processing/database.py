@@ -86,7 +86,7 @@ def screenshot_sequence(path):
 
 def inventory(connection, root):
     root = Path(root).resolve()
-    raw_directory = root / "raw_data"
+    raw_directory = root / "raw_screenshots"
     if not raw_directory.is_dir():
         raise ValueError(f"Screenshot directory does not exist: {raw_directory}")
     counts = {"files": 0, "new_images": 0, "known_images": 0, "unreadable": 0}
@@ -98,8 +98,8 @@ def inventory(connection, root):
     with connection:
         connection.execute("UPDATE source_paths SET present = 0")
         for path in paths:
-            if not path.resolve().is_relative_to(root):
-                raise ValueError(f"Image resolves outside the project: {path}")
+            if not path.resolve().is_relative_to(raw_directory.resolve()):
+                raise ValueError(f"Image resolves outside the screenshot directory: {path}")
             sha256 = image_hash(path)
             counts["files"] += 1
             known = connection.execute("SELECT id FROM source_images WHERE sha256 = ?", (sha256,)).fetchone()

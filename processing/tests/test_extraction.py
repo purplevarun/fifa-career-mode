@@ -4,7 +4,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from career_data.extraction import ScreenshotExtractor, classify, parse_counts, parse_header, parse_integer
+from processing.extraction import ScreenshotExtractor, classify, parse_counts, parse_header, parse_integer
 
 
 class ParsingTests(unittest.TestCase):
@@ -38,10 +38,10 @@ class ScreenshotTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.extractor = ScreenshotExtractor()
-        cls.root = Path(__file__).resolve().parents[1]
+        cls.root = Path(__file__).resolve().parents[2]
 
     def extract(self, sequence, method, **kwargs):
-        with Image.open(self.root / "raw_data" / f"Screenshot ({sequence}).png") as image:
+        with Image.open(self.root / "raw_screenshots" / f"Screenshot ({sequence}).png") as image:
             return method(image.convert("RGB"), **kwargs)[0]
 
     def test_preseason_score_and_team_stats(self):
@@ -77,7 +77,7 @@ class ScreenshotTests(unittest.TestCase):
         self.assertIsNone(first["observed_on"])
 
     def test_season_totals_remain_separate_from_match_stats(self):
-        with Image.open(self.root / "raw_data/Screenshot (1056).png") as image:
+        with Image.open(self.root / "raw_screenshots/Screenshot (1056).png") as image:
             records, evidence = self.extractor.extract_squad_totals(image.convert("RGB"))
         total = next(record for record in records if record["scope"] == "all_competitions")
         self.assertEqual(total["type"], "player_competition_snapshot")
@@ -89,7 +89,7 @@ class ScreenshotTests(unittest.TestCase):
         self.assertIn("season_totals.5.goals", evidence)
 
     def test_season_table_detection_survives_misread_heading(self):
-        extraction = self.extractor.extract(self.root / "raw_data/Screenshot (1071).png")
+        extraction = self.extractor.extract(self.root / "raw_screenshots/Screenshot (1071).png")
         records = [record for record in extraction["records"] if record["type"] == "player_competition_snapshot"]
         self.assertEqual(len(records), 6)
         self.assertEqual(records[0]["player"], "Elliott Hewitt")

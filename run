@@ -3,12 +3,18 @@ set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 WEB_DIR="$ROOT_DIR/web"
+cd "$ROOT_DIR"
 
 usage() {
   cat <<'EOF'
 Usage: ./run <command> [args...]
 
 Commands:
+  process      Scan screenshots and save new OCR results to local SQLite
+  review       Prepare OCR results for visual review
+  approve      Save reviewed records to the local database
+  status       Show saved stats and processing state
+  backup       Create a local SQLite backup
   format       Format web source and project documentation with Prettier
   dev          Start the Vite development server
   build        Build the production dashboard
@@ -25,6 +31,9 @@ command_name=${1:-}
 shift || true
 
 case "$command_name" in
+  process|approve|review|status|backup|inventory|validate|report|reconcile|export)
+    exec python3 -m processing "$command_name" "$@"
+    ;;
   format)
     exec npm --prefix "$WEB_DIR" exec -- prettier --write \
       "$WEB_DIR/package.json" "$WEB_DIR/*.json" "$WEB_DIR/*.ts" \

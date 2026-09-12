@@ -5,10 +5,10 @@ import unittest
 from contextlib import closing
 from pathlib import Path
 
-from career_data.identifiers import is_uuid, new_id, resolve_id
-from career_data.migrations import migrate_to_uuids
-from career_data.database import connect, inventory, validate_database
-from career_data.pipeline import approve_review
+from processing.identifiers import is_uuid, new_id, resolve_id
+from processing.migrations import migrate_to_uuids
+from processing.database import connect, inventory, validate_database
+from processing.pipeline import approve_review
 from PIL import Image
 
 
@@ -47,7 +47,7 @@ class IdentifierTests(unittest.TestCase):
             """)
             source_hash = "a" * 64
             connection.execute("INSERT INTO source_images VALUES (?, 10, 40, 20)", (source_hash,))
-            connection.execute("INSERT INTO source_paths VALUES ('raw_data/example.png', ?, 1, 1)", (source_hash,))
+            connection.execute("INSERT INTO source_paths VALUES ('raw_screenshots/example.png', ?, 1, 1)", (source_hash,))
             connection.execute("INSERT INTO players VALUES (1, 'Aaron Ramsdale', 'England')")
             connection.execute("INSERT INTO player_aliases VALUES ('a. ramsdale', 1)")
             for revision, goals in ((1, 0), (2, 1), (3, 0)):
@@ -55,7 +55,7 @@ class IdentifierTests(unittest.TestCase):
                 connection.execute("INSERT INTO reviews VALUES (?, ?, ?, ?, 'Checked', '2026-09-10')",
                                    (revision, source_hash, payload, str(revision)))
             connection.commit()
-            schema = (Path(__file__).resolve().parents[1] / "career_data/schema.sql").read_text()
+            schema = (Path(__file__).resolve().parents[2] / "processing/schema.sql").read_text()
             backup_path = migrate_to_uuids(connection, path, schema)
             player_id = connection.execute("SELECT id FROM players").fetchone()[0]
             self.assertTrue(is_uuid(player_id))
@@ -75,8 +75,8 @@ class IdentifierTests(unittest.TestCase):
     def test_fresh_importer_uses_uuid_entities_and_stable_source_hashes(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            (root / "raw_data").mkdir()
-            Image.new("RGB", (40, 20), "white").save(root / "raw_data/Screenshot (73).png")
+            (root / "raw_screenshots").mkdir()
+            Image.new("RGB", (40, 20), "white").save(root / "raw_screenshots/Screenshot (73).png")
             connection = connect(root / "career.sqlite")
             self.assertEqual(inventory(connection, root)["new_images"], 1)
             source = connection.execute("SELECT id, sha256 FROM source_images").fetchone()
@@ -107,7 +107,7 @@ class IdentifierTests(unittest.TestCase):
                 INSERT INTO player_aliases VALUES ('broken alias', 999);
                 PRAGMA user_version = 2;
             """)
-            schema = (Path(__file__).resolve().parents[1] / "career_data/schema.sql").read_text()
+            schema = (Path(__file__).resolve().parents[2] / "processing/schema.sql").read_text()
             with self.assertRaises(KeyError):
                 migrate_to_uuids(connection, path, schema)
             self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 2)

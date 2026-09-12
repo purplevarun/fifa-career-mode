@@ -5,7 +5,7 @@ from pathlib import Path
 
 from .database import connect, json_text
 from .extraction import TEAM_ROWS
-from .pipeline import approve_review, export_data, make_review, select_sources, write_json
+from .pipeline import approve_review, make_review, select_sources, write_json
 
 
 PLAYER_CORE_FIELDS = {
@@ -211,8 +211,7 @@ def main():
     parser.add_argument("--replace-reviewed", action="store_true")
     parser.add_argument("--kind", choices=("matches", "players", "teams", "season"), default="matches")
     arguments = parser.parse_args()
-    root = Path(__file__).resolve().parents[1]
-    connection = connect(root / "data/career.sqlite")
+    connection = connect(Path(__file__).resolve().parent / "data" / "career.sqlite")
     try:
         decisions = json.loads(arguments.decisions.read_text(encoding="utf-8"))
         prepare = {"matches": prepare_match_headers, "players": prepare_player_cores, "teams": prepare_team_tables, "season": prepare_season_end}[arguments.kind]
@@ -223,7 +222,6 @@ def main():
             note_key = {"matches": "match_header_review", "players": "player_core_review", "teams": "team_table_review", "season": "review_note"}[arguments.kind]
             note = decisions[note_key]
             print(json_text(approve_review(connection, document, note, arguments.replace_reviewed)), end="")
-            print(json_text(export_data(connection, root / "data/exports/career.json")), end="")
     finally:
         connection.close()
 
