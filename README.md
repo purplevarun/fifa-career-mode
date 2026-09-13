@@ -115,6 +115,16 @@ results remain available for later processing. Automatically imported values
 are not manually verified, so OCR mistakes that pass validation can still occur.
 Existing saved stats and their identifiers are preserved.
 
+## OCR Reliability
+
+OCR improvements are implemented in the processor and tested against values
+visible in original screenshots. Processing does not load a saved-answer file
+to override fresh extraction. Incremental processing still preserves existing
+SQLite corrections and learned aliases, but a clean rebuild starts without them.
+Recognition and relationship validation cannot guarantee 100% accuracy for
+arbitrary screenshots. Unsupported screens and missing context are reported;
+zero coverage warnings does not mean every screenshot yielded a record.
+
 ## Rebuild From Scratch
 
 ```sh
@@ -122,22 +132,27 @@ Existing saved stats and their identifiers are preserved.
 ```
 
 This backs up the existing database to a unique file under
-`processing/data/backups/`, verifies that backup, resets the active database to
-a fresh schema, and rebuilds statistics automatically from every distinct image
-currently in `raw_screenshots/`. The backup path is printed before the reset. If the backup
-fails, the existing database is not reset. If no database exists, one is created
-without a backup.
+`processing/data/backups/` and verifies that backup. It then runs OCR and imports
+into a fresh, isolated in-memory database while the active database stays
+unchanged. Database validation must pass and every extracted record must import
+successfully before SQLite's backup API replaces the active database. OCR errors,
+failed imports, or database integrity errors leave the active database untouched.
+Screens with no extracted statistics can be skipped. If no database exists,
+one is created only after a successful rebuild.
 
-**This clears saved stats, approvals, manual corrections, and processing history
-from the active database.** Only screenshots still present can be processed
-again; deleted originals cannot be reconstructed. With an empty screenshot
-folder, the rebuilt database has no stats. Valid new OCR results are saved
-automatically; no approval step follows the rebuild.
+**A successful rebuild regenerates IDs and clears saved corrections, learned
+aliases, and processing history.** It rebuilds from screenshots using the current
+OCR code, so its results are not guaranteed to reproduce every earlier manual
+correction. Only screenshots still present can be processed again; deleted originals cannot be reconstructed.
+With an empty screenshot folder, the rebuilt database has no stats. Valid new
+OCR results are saved automatically; no approval step follows the rebuild.
 
 Original images, existing backups, and old review files are not deleted. Record
 IDs are regenerated, so old review files must not be replayed after a reset. `--clean`
 cannot be combined with `--limit` or `--screenshots`; it is a full rebuild. After
-an interruption, resume with plain `./run process` to keep completed work.
+an interruption during a clean rebuild, the active database remains unchanged
+and a new clean attempt starts over. Ordinary incremental processing still keeps
+completed extraction work and resumes with plain `./run process`.
 For an OCR refresh that keeps reviewed stats, use `./run process --reextract`
 instead.
 

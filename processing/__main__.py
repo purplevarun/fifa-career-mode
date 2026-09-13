@@ -53,7 +53,7 @@ def main(argv=None):
         if arguments.screenshots is not None or arguments.limit is not None:
             raise ValueError("--clean cannot be combined with --screenshots or --limit; a clean rebuild processes all screenshots")
         reset["clean"] = True
-        print("Clean rebuild: existing stats, approvals, and processing history will be reset.", flush=True)
+        print("Clean rebuild: preparing a fresh database; existing stats stay unchanged until the rebuild passes validation.", flush=True)
         if database_path.exists():
             backup_path = database_path.parent / "backups" / f"{database_path.stem}-before-clean-{new_id()}.sqlite"
             with closing(sqlite3.connect(database_path.as_uri() + "?mode=rw", uri=True)) as previous:
@@ -62,8 +62,6 @@ def main(argv=None):
                     if saved.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
                         raise ValueError("Backup integrity check failed; existing database was not reset")
                 print(f"Existing database backed up to {backup_path}", flush=True)
-                with closing(connect(":memory:")) as fresh:
-                    fresh.backup(previous)
     if arguments.command == "data":
         if not database_path.is_file():
             raise ValueError("No local stats database yet. Run ./run process first.")
@@ -74,7 +72,7 @@ def main(argv=None):
         return 0
     if arguments.command in {"process", "import", "inventory"}:
         (root / "raw_screenshots").mkdir(parents=True, exist_ok=True)
-    connection = connect(database_path)
+    connection = connect(":memory:" if reset else database_path)
     try:
         if arguments.command == "inventory":
             print(json_text(inventory(connection, root)), end="")
@@ -106,6 +104,23 @@ def main(argv=None):
             source_ids = results.pop("processed_source_ids")
             imported = import_pending(connection, sequences, source_ids)
             result = {"database": str(database_path), "inventory": manifest, "extraction": results, "import": imported, **reset}
+            if reset:
+                errors = validate_database(connection)
+                for skipped in imported["skipped_sources"]:
+                    has_records = connection.execute(
+                        "SELECT 1 FROM extractions JOIN source_paths ON source_paths.source_id = extractions.source_id "
+                        "WHERE source_paths.path = ? AND json_array_length(extractions.candidate_json) > 0", (skipped["path"],),
+                    ).fetchone()
+                    if has_records:
+                        errors.append(f"Extracted statistics could not be imported: {skipped['path']}: {skipped['reason']}")
+                if results["errors"] or errors:
+                    result["validation_errors"] = errors
+                    result["message"] = "Clean rebuild failed; the active database was not changed. See extraction errors and skipped sources."
+                    print(json_text(result), end="")
+                    return 1
+                database_path.parent.mkdir(parents=True, exist_ok=True)
+                with closing(sqlite3.connect(database_path)) as active:
+                    connection.backup(active)
             if imported["imported_sources"]:
                 result["message"] = "Stats saved to SQLite automatically. Reload the local dashboard to see the changes."
             else:

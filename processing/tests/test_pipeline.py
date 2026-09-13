@@ -1079,6 +1079,73 @@ class CommandTests(DatabaseTestCase):
         self.assertEqual(self.command("process")["extraction"]["extracted"], 0)
         self.assertEqual(self.extractor.extract.call_count, 2)
 
+    def test_clean_rebuild_uses_new_ocr_not_saved_answers(self):
+        self.create_image()
+        self.command("process")
+        document = make_review(self.connection)
+        document["sources"][0]["records"][0]["home_goals"] = 3
+        approve_review(self.connection, document, "Corrected visible score", replace_reviewed=True)
+        old_match = self.command("data")["matches"][0]
+        path = self.root / "processing" / "corrections.json"
+        path.parent.mkdir()
+        path.write_text(json.dumps({"schema_version": 99, "sources": {}}), encoding="utf-8")
+
+        result = self.command("process", "--clean")
+
+        self.assertEqual(result["import"]["skipped_sources"], [])
+        rebuilt = self.command("data")["matches"][0]
+        self.assertEqual(old_match["home_goals"], 3)
+        self.assertEqual(rebuilt["home_goals"], 1)
+        self.assertNotEqual(rebuilt["id"], old_match["id"])
+        self.assertEqual(self.record["home_goals"], 1)
+        self.assertEqual(self.command("process")["extraction"]["extracted"], 0)
+
+    def test_clean_ocr_failure_preserves_the_active_database(self):
+        from processing.__main__ import main
+
+        self.create_image()
+        self.command("process")
+        before = self.command("data")["matches"]
+        self.extractor.extract.side_effect = ValueError("OCR could not read the image")
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            result = main(["--root", str(self.root), "--db", str(self.root / "career.sqlite"), "process", "--clean"])
+
+        self.assertEqual(result, 1)
+        self.assertIn("active database was not changed", output.getvalue())
+        self.assertEqual(self.command("data")["matches"], before)
+
+    def test_clean_failed_import_preserves_the_active_database(self):
+        from processing.__main__ import main
+
+        self.create_image()
+        self.command("process")
+        before = self.command("data")["matches"]
+        self.record["played_on"] = None
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            result = main(["--root", str(self.root), "--db", str(self.root / "career.sqlite"), "process", "--clean"])
+
+        self.assertEqual(result, 1)
+        self.assertIn("Extracted statistics could not be imported", output.getvalue())
+        self.assertEqual(self.command("data")["matches"], before)
+
+    def test_clean_non_stat_screen_does_not_block_valid_stats(self):
+        self.create_image()
+        self.create_image("Screenshot (74).png", color="black")
+        self.command("process")
+        self.extractor.extract.side_effect = [self.extractor.extract.return_value, {
+            "screen_type": "dashboard", "records": [], "evidence": {}, "issues": [],
+        }]
+
+        result = self.command("process", "--clean")
+
+        self.assertEqual(result["import"]["imported_sources"], 1)
+        self.assertEqual(len(result["import"]["skipped_sources"]), 1)
+        self.assertEqual(len(self.command("data")["matches"]), 1)
+
     def test_clean_creates_missing_default_database_without_touching_other_sqlite(self):
         from processing.__main__ import main
 
