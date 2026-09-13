@@ -1549,6 +1549,8 @@
 	}
 
 	.event-date {
+		display: grid;
+		gap: 4px;
 		font-size: 11px;
 		color: var(--muted);
 	}

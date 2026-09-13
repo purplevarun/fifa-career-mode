@@ -604,6 +604,39 @@ describe("local stats pages", () => {
 		expect(html).toContain("No Player of the Year awards recorded");
 		expect(html).toContain("No championships in this selection");
 	});
+	it("separates announcement dates and spaces compact Golden Boot headlines without changing stored text", () => {
+		const event = {
+			id: "00000000-0000-4000-8000-000000000135",
+			event_type: "golden_boot",
+			player_id: fixture.players[0].id,
+			competition_season_id: fixture.competition_seasons[0].id,
+			period: "2018/19",
+			announced_on: "2019-05-04",
+			description: "ZokoWinsGoldenBoot.",
+		};
+		const model = createModel({ ...fixture, competition_events: [event] });
+		const html = renderToStaticMarkup(
+			<MemoryRouter initialEntries={["/career?tab=events"]}>
+				<CareerContext
+					value={{
+						model,
+						filters: defaultFilters,
+						matches: model.matches,
+					}}
+				>
+					<CareerRecords />
+				</CareerContext>
+			</MemoryRouter>,
+		);
+		expect(html).toContain(
+			'<div class="event-date"><span>2018/19</span><small class="muted">Announced 4 May</small></div>',
+		);
+		expect(html).toContain("Zoko wins Golden Boot.");
+		expect(html).not.toContain("ZokoWinsGoldenBoot");
+		expect(model.data.competition_events[0].description).toBe(
+			"ZokoWinsGoldenBoot.",
+		);
+	});
 	it("groups monthly honours by player and season and shows the award month", () => {
 		const data = {
 			...fixture,

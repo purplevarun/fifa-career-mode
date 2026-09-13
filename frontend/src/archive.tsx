@@ -360,18 +360,24 @@ export function CareerRecords() {
 						{visibleEvents.map((event) => (
 							<article className="event-record" key={event.id}>
 								<div className="event-date">
-									{typeof event.period === "string"
-										? /^\d{4}-\d{2}$/.test(event.period)
-											? new Date(
-													`${event.period}-01T12:00:00`,
-												).toLocaleDateString("en-GB", {
-													month: "long",
-													year: "numeric",
-												})
-											: event.period
-										: typeof event.announced_on === "string"
-											? dateLabel(event.announced_on)
-											: "Date not recorded"}
+									<span>
+										{typeof event.period === "string"
+											? /^\d{4}-\d{2}$/.test(event.period)
+												? new Date(
+														`${event.period}-01T12:00:00`,
+													).toLocaleDateString(
+														"en-GB",
+														{
+															month: "long",
+															year: "numeric",
+														},
+													)
+												: event.period
+											: typeof event.announced_on ===
+												  "string"
+												? dateLabel(event.announced_on)
+												: "Date not recorded"}
+									</span>
 									{typeof event.announced_on === "string" && (
 										<small className="muted">
 											Announced{" "}
@@ -395,7 +401,14 @@ export function CareerRecords() {
 												)}
 									</div>
 									<h2>{label(String(event.event_type))}</h2>
-									<p>{String(event.description)}</p>
+									<p>
+										{event.event_type === "golden_boot"
+											? String(event.description).replace(
+													/\s*Wins\s*Golden\s*Boot\b/i,
+													" wins Golden Boot",
+												)
+											: String(event.description)}
+									</p>
 									{typeof event.player_id === "string" && (
 										<CareerLink
 											to={`/players/${event.player_id}`}
