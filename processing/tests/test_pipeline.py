@@ -1443,6 +1443,395 @@ class AutomaticImportTests(DatabaseTestCase):
         ]
         extract_pending(self.connection, self.root, extractor=extractor)
 
+    def test_opening_profile_uses_following_season_without_inventing_a_date(self):
+        self.extract(
+            (
+                "squad",
+                [
+                    {
+                        "type": "player_snapshot",
+                        "player": "Harry Kewell",
+                        "club": "Notts County",
+                        "season": None,
+                        "overall": 65,
+                        "snapshot_kind": "first_observed",
+                        "date_precision": "unknown",
+                        "observed_on": None,
+                    }
+                ],
+            ),
+            ("match_facts", [self.match]),
+        )
+
+        result = import_pending(self.connection)
+
+        self.assertEqual(result["skipped_sources"], [])
+        self.assertEqual(result["imported_sources"], 2)
+        snapshot = self.connection.execute(
+            "SELECT snapshot.*, season.label FROM player_snapshots snapshot "
+            "JOIN seasons season ON season.id = snapshot.season_id"
+        ).fetchone()
+        self.assertEqual(snapshot["label"], "2018/19")
+        self.assertIsNone(snapshot["observed_on"])
+        self.assertIn("context", snapshot["date_basis"].lower())
+
+    def test_season_tables_resolve_context_across_a_season_change(self):
+        self.extract(
+            ("match_facts", [{**self.match, "competition": "EFL League Two"}]),
+            (
+                "squad",
+                [
+                    {
+                        "type": "player_competition_snapshot",
+                        "player": "Harry Kewell",
+                        "club": "Notts County",
+                        "season": None,
+                        "competition": "EFL League Two",
+                        "scope": "competition",
+                        "snapshot_kind": "in_season",
+                        "appearances": 12,
+                    }
+                ],
+            ),
+            (
+                "match_facts",
+                [
+                    {
+                        **self.match,
+                        "competition": "EFL League One",
+                        "season": "2019/20",
+                        "played_on": "2019-07-04",
+                    }
+                ],
+            ),
+        )
+
+        result = import_pending(self.connection)
+
+        self.assertEqual(result["skipped_sources"], [])
+        snapshot = self.connection.execute(
+            "SELECT snapshot.*, season.label FROM player_competition_snapshots snapshot "
+            "JOIN seasons season ON season.id = snapshot.season_id"
+        ).fetchone()
+        self.assertEqual(snapshot["label"], "2018/19")
+        self.assertIsNone(snapshot["observed_on"])
+        self.assertEqual(snapshot["appearances"], 12)
+
+    def test_ambiguous_season_boundary_is_not_guessed(self):
+        self.extract(
+            ("match_facts", [self.match]),
+            (
+                "squad",
+                [
+                    {
+                        "type": "player_snapshot",
+                        "player": "Harry Kewell",
+                        "club": "Notts County",
+                        "season": None,
+                        "overall": 65,
+                        "snapshot_kind": "first_observed",
+                    }
+                ],
+            ),
+            (
+                "match_facts",
+                [{**self.match, "season": "2019/20", "played_on": "2019-07-04"}],
+            ),
+        )
+
+        result = import_pending(self.connection)
+
+        self.assertEqual(result["imported_sources"], 2)
+        self.assertEqual(len(result["skipped_sources"]), 1)
+        self.assertIn("season", result["skipped_sources"][0]["reason"])
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM player_snapshots").fetchone()[
+                0
+            ],
+            0,
+        )
+
+    def test_monthly_award_uses_player_league_in_award_month_not_nearby_cup(self):
+        self.extract(
+            ("match_facts", [{**self.match, "competition": "EFL League Two"}]),
+            ("player_performance", [self.player]),
+            ("match_facts", [{**self.match, "played_on": "2018-07-05"}]),
+            ("player_performance", [self.player]),
+            (
+                "dashboard_award",
+                [
+                    parse_news_event(
+                        "Kewell grabs July Player of the Month Award",
+                        observed_on="2018-08-01",
+                    )
+                ],
+            ),
+        )
+
+        result = import_pending(self.connection)
+
+        self.assertEqual(result["skipped_sources"], [])
+        self.assertEqual(result["imported_sources"], 5)
+        award = self.connection.execute(
+            "SELECT player.name, competition.name, club.name, event.period, event.announced_on "
+            "FROM competition_events event JOIN players player ON player.id = event.player_id "
+            "JOIN competition_seasons edition ON edition.id = event.competition_season_id "
+            "JOIN competitions competition ON competition.id = edition.competition_id "
+            "JOIN clubs club ON club.id = event.club_id"
+        ).fetchone()
+        self.assertEqual(
+            tuple(award),
+            ("Harry Kewell", "EFL League Two", "Notts County", "2018-07", None),
+        )
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM players").fetchone()[0], 1
+        )
+        payload = json.loads(
+            self.connection.execute(
+                "SELECT payload_json FROM reviews review JOIN source_paths path "
+                "ON path.source_id = review.source_id WHERE path.sequence = 77"
+            ).fetchone()[0]
+        )
+        self.assertIn("2018-07", payload["records"][0]["context_basis"])
+        self.assertEqual(import_pending(self.connection)["imported_sources"], 0)
+
+    def test_monthly_award_does_not_guess_between_leagues(self):
+        self.extract(
+            ("match_facts", [{**self.match, "competition": "EFL League Two"}]),
+            ("player_performance", [self.player]),
+            (
+                "match_facts",
+                [
+                    {
+                        **self.match,
+                        "competition": "EFL League One",
+                        "played_on": "2018-07-05",
+                    }
+                ],
+            ),
+            ("player_performance", [self.player]),
+            (
+                "news",
+                [
+                    parse_news_event(
+                        "Kewell grabs July Player of the Month Award",
+                        announced_on="2018-08-05",
+                    )
+                ],
+            ),
+        )
+
+        result = import_pending(self.connection)
+
+        self.assertEqual(result["imported_sources"], 4)
+        self.assertIn("2 matching league", result["skipped_sources"][0]["reason"])
+        self.assertEqual(
+            self.connection.execute(
+                "SELECT COUNT(*) FROM competition_events"
+            ).fetchone()[0],
+            0,
+        )
+
+    def test_ambiguous_award_surname_does_not_create_another_player(self):
+        self.create_player("Harry Kewell")
+        self.create_player("Alan Kewell")
+        self.connection.commit()
+        self.extract(
+            (
+                "news",
+                [
+                    {
+                        **parse_news_event(
+                            "Kewell grabs July Player of the Month Award",
+                            announced_on="2018-08-05",
+                        ),
+                        "competition": "EFL League Two",
+                    }
+                ],
+            )
+        )
+
+        result = import_pending(self.connection)
+
+        self.assertEqual(result["imported_sources"], 0)
+        self.assertIn("Ambiguous player name", result["skipped_sources"][0]["reason"])
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM players").fetchone()[0], 2
+        )
+
+    def test_golden_boot_uses_matching_championship_and_individual_award_context(self):
+        self.extract(
+            (
+                "news",
+                [
+                    parse_news_event(
+                        "Goalkeeper of the Tournament Announced",
+                        "Harry Kewell has been named goalkeeper of the EFL League Two.",
+                        "2019-05-04",
+                    ),
+                    parse_news_event(
+                        "Notts County Crowned EFL League Two Champions",
+                        announced_on="2019-05-04",
+                    ),
+                    parse_news_event(
+                        "Another Forward Wins Golden Boot", announced_on="2019-05-04"
+                    ),
+                ],
+            )
+        )
+
+        result = import_pending(self.connection)
+
+        self.assertEqual(result["skipped_sources"], [])
+        self.assertEqual(result["imported_records"], 3)
+        award = self.connection.execute(
+            "SELECT competition.name, event.club_id FROM competition_events event "
+            "JOIN competition_seasons edition ON edition.id = event.competition_season_id "
+            "JOIN competitions competition ON competition.id = edition.competition_id "
+            "WHERE event.event_type = 'golden_boot'"
+        ).fetchone()
+        self.assertEqual(award[0], "EFL League Two")
+        self.assertIsNone(award[1])
+
+    def test_golden_boot_does_not_borrow_conflicting_news_context(self):
+        self.extract(
+            (
+                "news",
+                [
+                    parse_news_event(
+                        "Goalkeeper of the Tournament Announced",
+                        "Harry Kewell has been named goalkeeper of the EFL League One.",
+                        "2019-05-04",
+                    ),
+                    parse_news_event(
+                        "Notts County Crowned EFL League Two Champions",
+                        announced_on="2019-05-04",
+                    ),
+                    parse_news_event(
+                        "Another Forward Wins Golden Boot", announced_on="2019-05-04"
+                    ),
+                ],
+            )
+        )
+
+        result = import_pending(self.connection)
+
+        self.assertEqual(result["imported_sources"], 0)
+        self.assertIn(
+            "A competition is required for golden_boot",
+            result["skipped_sources"][0]["reason"],
+        )
+
+    def test_golden_boot_does_not_borrow_awards_from_a_different_date(self):
+        self.extract(
+            (
+                "news",
+                [
+                    parse_news_event(
+                        "Goalkeeper of the Tournament Announced",
+                        "Harry Kewell has been named goalkeeper of the EFL League Two.",
+                        "2019-05-04",
+                    ),
+                    parse_news_event(
+                        "Notts County Crowned EFL League Two Champions",
+                        announced_on="2019-05-04",
+                    ),
+                    parse_news_event(
+                        "Another Forward Wins Golden Boot", announced_on="2019-05-05"
+                    ),
+                ],
+            )
+        )
+
+        result = import_pending(self.connection)
+
+        self.assertEqual(result["imported_sources"], 0)
+        self.assertIn(
+            "A competition is required for golden_boot",
+            result["skipped_sources"][0]["reason"],
+        )
+
+    def test_repeated_name_consensus_resolves_same_club_ocr_variant(self):
+        self.extract(
+            ("match_facts", [self.match]),
+            ("player_performance", [{**self.player, "player": "Harry KewellO"}]),
+            ("match_facts", [{**self.match, "played_on": "2018-07-05"}]),
+            ("player_performance", [self.player]),
+            ("match_facts", [{**self.match, "played_on": "2018-07-06"}]),
+            ("player_performance", [self.player]),
+        )
+        evidence = {
+            "fields": {
+                "first_name": {"raw_text": "Harry"},
+                "last_name": {
+                    "raw_text": "Kewell",
+                    "initial_reading": {"raw_text": "KewellO"},
+                    "method": "rapidocr_detected_name_consensus",
+                },
+            }
+        }
+        with self.connection:
+            self.connection.execute(
+                "UPDATE extractions SET evidence_json = ? WHERE source_id IN "
+                "(SELECT source_id FROM source_paths WHERE sequence IN (76, 78))",
+                (json.dumps(evidence),),
+            )
+
+        result = import_pending(self.connection)
+
+        self.assertEqual(result["skipped_sources"], [])
+        self.assertEqual(
+            [row[0] for row in self.connection.execute("SELECT name FROM players")],
+            ["Harry Kewell"],
+        )
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM player_matches").fetchone()[
+                0
+            ],
+            3,
+        )
+        payload = json.loads(
+            self.connection.execute(
+                "SELECT payload_json FROM reviews JOIN source_paths USING(source_id) "
+                "WHERE sequence = 74"
+            ).fetchone()[0]
+        )
+        self.assertIn("2 other screenshots", payload["records"][0]["context_basis"])
+
+    def test_single_name_correction_does_not_establish_a_global_alias(self):
+        self.extract(
+            ("match_facts", [self.match]),
+            ("player_performance", [{**self.player, "player": "Harry KewellO"}]),
+            ("match_facts", [{**self.match, "played_on": "2018-07-05"}]),
+            ("player_performance", [self.player]),
+        )
+        with self.connection:
+            self.connection.execute(
+                "UPDATE extractions SET evidence_json = ? WHERE source_id IN "
+                "(SELECT source_id FROM source_paths WHERE sequence = 76)",
+                (
+                    json.dumps(
+                        {
+                            "fields": {
+                                "first_name": {"raw_text": "Harry"},
+                                "last_name": {
+                                    "raw_text": "Kewell",
+                                    "initial_reading": {"raw_text": "KewellO"},
+                                    "method": "rapidocr_detected_name_consensus",
+                                },
+                            }
+                        }
+                    ),
+                ),
+            )
+
+        import_pending(self.connection)
+
+        self.assertEqual(
+            {row[0] for row in self.connection.execute("SELECT name FROM players")},
+            {"Harry Kewell", "Harry KewellO"},
+        )
+
     def test_cached_candidates_import_and_link_once(self):
         self.extract(
             ("match_facts", [self.match]), ("player_performance", [self.player])
@@ -1479,9 +1868,10 @@ class AutomaticImportTests(DatabaseTestCase):
         result = import_pending(self.connection)
 
         self.assertEqual(result["imported_sources"], 3)
-        self.assertEqual(len(result["skipped_sources"]), 2)
+        self.assertEqual(len(result["skipped_sources"]), 1)
+        self.assertEqual(len(result["ignored_sources"]), 1)
         self.assertIn(
-            "No unambiguous preceding match", result["skipped_sources"][1]["reason"]
+            "No unambiguous preceding match", result["skipped_sources"][0]["reason"]
         )
         appearance = self.connection.execute(
             "SELECT played_on FROM matches JOIN player_matches ON player_matches.match_id = matches.id",
@@ -2221,8 +2611,28 @@ class CommandTests(DatabaseTestCase):
         result = self.command("process")
 
         self.assertEqual(result["import"]["imported_sources"], 1)
-        self.assertEqual(len(result["import"]["skipped_sources"]), 1)
+        self.assertEqual(result["import"]["skipped_sources"], [])
+        self.assertEqual(len(result["import"]["ignored_sources"]), 1)
+        self.assertEqual(result["validation_errors"], [])
+        self.assertEqual(result["processing_run"]["status"], "completed")
+        self.assertEqual(result["processing_run"]["skipped_sources"], 0)
         self.assertEqual(len(self.command("data")["matches"]), 1)
+
+    def test_process_recognized_stat_screen_without_records_is_not_ignored(self):
+        self.create_image()
+        self.extractor.extract.return_value = {
+            "screen_type": "match_facts",
+            "records": [],
+            "evidence": {},
+            "issues": ["Unsupported aspect ratio"],
+        }
+
+        result = self.command("process", expected_exit=1)
+
+        self.assertEqual(result["import"]["ignored_sources"], [])
+        self.assertEqual(len(result["import"]["skipped_sources"]), 1)
+        self.assertEqual(result["processing_run"]["status"], "partial")
+        self.assertTrue(result["validation_errors"])
 
     def test_process_rebuilds_default_database_without_touching_other_sqlite(self):
         match_id = self.create_match()

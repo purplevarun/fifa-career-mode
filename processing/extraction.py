@@ -484,6 +484,59 @@ class ScreenshotExtractor:
                     )
         return evidence
 
+    def refine_name_fields(self, image, tokens, fields):
+        for field in ("first_name", "last_name"):
+            original = fields[field]
+            left, top, right, bottom = original["box"]
+            selected = [
+                token
+                for token in tokens
+                if left <= sum(point[0] for point in token["box"]) / 4 <= right
+                and top <= sum(point[1] for point in token["box"]) / 4 <= bottom
+            ]
+            selected.sort(key=lambda token: min(point[0] for point in token["box"]))
+            detected = " ".join(token["text"].strip() for token in selected)
+            if (
+                not detected
+                or compact(detected) == compact(original["raw_text"])
+                or min(token["confidence"] for token in selected) < 0.7
+            ):
+                continue
+            points = [point for token in selected for point in token["box"]]
+            bounds = (
+                min(point[0] for point in points) * BASE_WIDTH,
+                min(point[1] for point in points) * BASE_HEIGHT,
+                max(point[0] for point in points) * BASE_WIDTH,
+                max(point[1] for point in points) * BASE_HEIGHT,
+            )
+            retries = self.recognize(
+                image,
+                {
+                    f"{field}.{padding}": (
+                        max(0, bounds[0] - padding),
+                        max(0, bounds[1] - padding),
+                        min(BASE_WIDTH, bounds[2] + padding),
+                        min(BASE_HEIGHT, bounds[3] + padding),
+                    )
+                    for padding in (0, 2, 4)
+                },
+            )
+            agreeing = [
+                reading
+                for reading in retries.values()
+                if reading["confidence"] >= max(0.75, original["confidence"] + 0.015)
+                and compact(reading["raw_text"]) == compact(detected)
+            ]
+            if len(agreeing) >= 2:
+                retry = max(agreeing, key=lambda reading: reading["confidence"])
+                fields[field] = {
+                    **retry,
+                    "initial_reading": original,
+                    "full_image_reading": detected,
+                    "name_retry": list(retries.values()),
+                    "method": "rapidocr_detected_name_consensus",
+                }
+
     def extract(self, path):
         with Image.open(path) as original:
             image = original.convert("RGB")
@@ -507,9 +560,7 @@ class ScreenshotExtractor:
             "dimensions": [image.width, image.height],
             "fields": {},
         }
-        issues = [
-            "Visual review is required before these candidates become canonical data."
-        ]
+        issues = []
         if abs(image.width / image.height - BASE_WIDTH / BASE_HEIGHT) > 0.015:
             return {
                 "screen_type": screen_type,
@@ -528,16 +579,16 @@ class ScreenshotExtractor:
             )
             records = [record]
             issues.append(
-                "Confirm match_id from the source sequence and fixture context, not adjacency alone."
+                "Match linking requires a valid preceding match summary with uninterrupted player screenshots."
             )
         elif screen_type == "squad":
             record, fields = self.extract_snapshot(image)
             records = [record]
             issues.append(
-                "Only the selected player's profile is proposed; other squad and totals rows need review."
+                "Only the selected player's profile and visible competition totals are extracted."
             )
             issues.append(
-                "Establish season and date precision from surrounding career evidence."
+                "The season requires related dated fixture or competition-table evidence; an exact observation date is not visible."
             )
             squad_text = compact(" ".join(token["text"] for token in tokens)).replace(
                 "0", "o"
@@ -551,7 +602,7 @@ class ScreenshotExtractor:
                 records.extend(additional_records)
                 fields.update(totals_fields)
                 issues.append(
-                    "Cumulative totals are observations, not extra match stats; confirm their season and cutoff."
+                    "Cumulative totals are separate observations, not extra match statistics."
                 )
         elif screen_type == "transfer":
             records, fields, transfer_issues = self.extract_transfer(tokens)
@@ -565,7 +616,7 @@ class ScreenshotExtractor:
         elif screen_type == "competition_result":
             records, fields = self.extract_competition_result(tokens)
             issues.append(
-                "Confirm the competition season and announcement date; the winner screen does not show them."
+                "The winner screen does not show its season or exact announcement date."
             )
         else:
             return {
@@ -573,9 +624,17 @@ class ScreenshotExtractor:
                 "records": [],
                 "evidence": evidence,
                 "issues": [
-                    f"{screen_type}: no automatic field layout yet; retain this source for manual review."
+                    f"{screen_type}: no supported statistics detected; OCR evidence is retained."
                 ],
             }
+        if screen_type in {"squad", "player_performance", "goalkeeper_performance"}:
+            self.refine_name_fields(image, tokens, fields)
+            name = " ".join(
+                fields[field]["raw_text"].strip()
+                for field in ("first_name", "last_name")
+            )
+            for record in records:
+                record["player"] = name
         evidence["fields"] = fields
         issues.extend(
             f"Low OCR confidence for {field}: {reading['confidence']:.2f}"
@@ -725,11 +784,11 @@ class ScreenshotExtractor:
         for record in records:
             if not record["competition"] or not record["season"]:
                 issues.append(
-                    f"Confirm competition/season for {record['description']}; unrelated articles are not used as context."
+                    f"Competition or season is not stated in the award text: {record['description']}"
                 )
             if record["player"]:
                 issues.append(
-                    f"Confirm the full player identity for {record['player']}; news may display only a surname."
+                    f"Resolve {record['player']} against recorded player identities; news may display only a surname."
                 )
         return records, fields, issues
 
@@ -795,8 +854,8 @@ class ScreenshotExtractor:
             ([record] if record else []),
             fields,
             [
-                "Dashboard month/year is observation context, not the award announcement date; confirm the award period.",
-                "Confirm the award's competition and club; upcoming fixtures, standings and the training player are not award evidence.",
+                "Dashboard month/year is observation context, not the award announcement date.",
+                "The award's competition and club require recorded player participation; upcoming fixtures and the training player are not award evidence.",
             ],
         )
 
@@ -925,7 +984,7 @@ class ScreenshotExtractor:
             "date_from": None,
             "date_to": None,
             "date_precision": "unknown",
-            "date_basis": "No exact in-game date on this screen; season context requires review.",
+            "date_basis": "No exact in-game date on this screen; the season requires related screenshot context.",
         }, fields
 
     def extract_squad_totals(self, image, profile=None):
@@ -967,7 +1026,7 @@ class ScreenshotExtractor:
                 "season": None,
                 "observed_on": None,
                 "snapshot_kind": "in_season",
-                "date_basis": "Season and observation cutoff must be confirmed from career context.",
+                "date_basis": "The season requires related career context; no exact observation cutoff is visible.",
                 "scope": "all_competitions" if total else "competition",
             }
             if not total:

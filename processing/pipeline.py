@@ -48,6 +48,7 @@ CONTEXT_FIELDS = {
     "match_source_id",
     "from_club",
     "to_club",
+    "context_basis",
 }
 
 
@@ -246,7 +247,7 @@ def extract_pending(
     return counts
 
 
-def resolve_candidate_players(connection, extraction):
+def resolve_candidate_players(connection, extraction, strict=False):
     players = connection.execute("SELECT id, name FROM players").fetchall()
     for record in extraction["records"]:
         name = record.get("player")
@@ -276,9 +277,13 @@ def resolve_candidate_players(connection, extraction):
             record["player"] = matching[0]["name"]
             if not exact:
                 extraction["issues"].append(
-                    f"OCR name {name!r} matched existing player {record['player']!r}; confirm this identity."
+                    f"OCR name {name!r} matched unambiguously to recorded player {record['player']!r}."
                 )
         elif len(matching) > 1:
+            if strict:
+                raise ValueError(
+                    f"Ambiguous player name {name!r}: matches multiple recorded players"
+                )
             extraction["issues"].append(
                 f"Ambiguous OCR player {name!r}; select the correct existing player_id during review."
             )
@@ -492,6 +497,10 @@ def ensure_season(connection, label):
 
 def ensure_edition(connection, record):
     season_id = ensure_season(connection, record.get("season"))
+    if not record.get("competition"):
+        raise ValueError(
+            f"A competition is required for {record.get('event_type', record.get('type', 'record'))}"
+        )
     name = normalized_name(record.get("competition"))
     competition = connection.execute(
         "SELECT * FROM competitions WHERE name = ? COLLATE NOCASE", (name,)
@@ -992,9 +1001,208 @@ def normalize_goalkeeper(connection, record):
         raise ValueError("Ambiguous shootout-inclusive goalkeeper count")
 
 
+def resolve_award_context(connection, record, records):
+    if record.get("type") != "competition_event" or record.get("competition"):
+        return
+    if record.get("event_type") != "player_of_the_month":
+        if record.get("event_type") != "golden_boot" or not record.get("announced_on"):
+            return
+        related = [
+            candidate
+            for candidate in records
+            if candidate.get("type") == "competition_event"
+            and candidate.get("event_type")
+            in {
+                "champion",
+                "player_of_the_competition",
+                "goalkeeper_of_the_competition",
+            }
+            and candidate.get("competition")
+            and not candidate.get("context_basis")
+            and candidate.get("season") == record.get("season")
+            and candidate.get("period") == record.get("period")
+            and candidate.get("announced_on") == record["announced_on"]
+        ]
+        competitions = {candidate["competition"] for candidate in related}
+        event_types = {candidate["event_type"] for candidate in related}
+        if (
+            len(competitions) == 1
+            and "champion" in event_types
+            and len(event_types) > 1
+        ):
+            record["competition"] = competitions.pop()
+            record["context_basis"] = (
+                "Competition inferred from the championship and individual award "
+                f"reported on the same screen for {record['announced_on']} and {record['season']}."
+            )
+        return
+    period = record.get("period")
+    if (
+        not record.get("player_id")
+        or not isinstance(period, str)
+        or not re.fullmatch(r"20\d{2}-\d{2}", period)
+    ):
+        raise ValueError(
+            f"Cannot determine the monthly award competition for {record.get('player')!r}: "
+            "a uniquely identified player and an exact award month are required"
+        )
+    editions = connection.execute(
+        "SELECT DISTINCT competition.name AS competition, season.label AS season, club.name AS club "
+        "FROM player_matches appearance JOIN matches fixture ON fixture.id = appearance.match_id "
+        "JOIN competition_seasons edition ON edition.id = fixture.competition_season_id "
+        "JOIN competitions competition ON competition.id = edition.competition_id "
+        "JOIN seasons season ON season.id = edition.season_id "
+        "JOIN clubs club ON club.id = appearance.club_id "
+        "WHERE appearance.player_id = ? AND substr(fixture.played_on, 1, 7) = ? "
+        "AND competition.kind = 'league' "
+        "AND (? IS NULL OR season.label = ?) AND (? IS NULL OR club.name = ? COLLATE NOCASE)",
+        (
+            record["player_id"],
+            period,
+            record.get("season"),
+            record.get("season"),
+            record.get("club"),
+            record.get("club"),
+        ),
+    ).fetchall()
+    if len(editions) != 1:
+        raise ValueError(
+            f"Cannot determine the monthly award competition for {record['player']} in {period}: "
+            f"{len(editions)} matching league and club contexts"
+        )
+    for field in ("competition", "season", "club"):
+        if not record.get(field):
+            record[field] = editions[0][field]
+    record["context_basis"] = (
+        f"Inferred from {record['player']}'s recorded league appearances in {period}."
+    )
+
+
+def resolve_repeated_ocr_names(connection, documents):
+    corrections = {}
+    for row in connection.execute(
+        "SELECT source_id, candidate_json, evidence_json FROM extractions"
+    ):
+        fields = json.loads(row["evidence_json"]).get("fields", {})
+        names = [fields.get(field, {}) for field in ("first_name", "last_name")]
+        if not all(reading.get("raw_text") for reading in names) or not any(
+            reading.get("method") == "rapidocr_detected_name_consensus"
+            for reading in names
+        ):
+            continue
+        original = " ".join(
+            reading.get("initial_reading", reading).get("raw_text", "").strip()
+            for reading in names
+        )
+        corrected = " ".join(reading["raw_text"].strip() for reading in names)
+        if original.casefold() == corrected.casefold():
+            continue
+        for record in json.loads(row["candidate_json"]):
+            if record.get("player") != corrected or not record.get("club"):
+                continue
+            key = (record["club"].casefold(), original.casefold())
+            corrections.setdefault(key, {}).setdefault(corrected, set()).add(
+                row["source_id"]
+            )
+    for document in documents.values():
+        if connection.execute(
+            "SELECT 1 FROM reviews WHERE source_id = ?", (document["source_id"],)
+        ).fetchone():
+            continue
+        for record in document["records"]:
+            name = record.get("player")
+            if not name or not record.get("club") or record.get("player_id"):
+                continue
+            choices = corrections.get((record["club"].casefold(), name.casefold()), {})
+            if len(choices) != 1:
+                continue
+            corrected, confirming_sources = next(iter(choices.items()))
+            if (
+                len(confirming_sources) < 2
+                or connection.execute(
+                    "SELECT 1 FROM player_aliases WHERE alias = ?", (name.casefold(),)
+                ).fetchone()
+            ):
+                continue
+            record["player"] = corrected
+            record["context_basis"] = (
+                f"OCR name {name!r} resolved as {corrected!r} from matching name-crop "
+                f"consensus in {len(confirming_sources)} other screenshots for {record['club']}."
+            )
+
+
+def source_season_contexts(connection, sources):
+    candidates = {
+        row["source_id"]: json.loads(row["candidate_json"])
+        for row in connection.execute(
+            "SELECT source_id, candidate_json FROM extractions"
+        )
+    }
+    anchors = {}
+    competition_seasons = {}
+    for source in sources:
+        if source["sequence"] is None:
+            continue
+        seasons = set()
+        for record in candidates.get(source["id"], []):
+            season = record.get("season")
+            if (
+                record.get("type") != "match"
+                or not isinstance(season, str)
+                or not re.fullmatch(r"\d{4}/\d{2}", season)
+                or not record.get("played_on")
+            ):
+                continue
+            try:
+                check_season_date(season, record["played_on"])
+            except (TypeError, ValueError):
+                continue
+            seasons.add(season)
+            if record.get("competition"):
+                competition_seasons.setdefault(record["competition"], set()).add(season)
+        if len(seasons) == 1:
+            anchors[source["id"]] = (seasons.pop(), source["path"])
+    for source in sources:
+        if source["sequence"] is None:
+            continue
+        competitions = {
+            record.get("competition")
+            for record in candidates.get(source["id"], [])
+            if record.get("type") == "player_competition_snapshot"
+            and record.get("scope") == "competition"
+        }
+        if competitions and all(name in competition_seasons for name in competitions):
+            seasons = set.intersection(
+                *(competition_seasons[name] for name in competitions)
+            )
+            if len(seasons) == 1:
+                anchors[source["id"]] = (
+                    seasons.pop(),
+                    f"{source['path']} competition tables and dated fixtures",
+                )
+    following = {}
+    context = None
+    for source in reversed(sources):
+        context = anchors.get(source["id"], context)
+        following[source["id"]] = context
+    contexts = {}
+    preceding = None
+    for source in sources:
+        preceding = anchors.get(source["id"], preceding)
+        after = following[source["id"]]
+        if source["sequence"] is None:
+            continue
+        if preceding and after and preceding[0] != after[0]:
+            continue
+        if preceding or after:
+            contexts[source["id"]] = preceding or after
+    return contexts
+
+
 def import_pending(connection, sequences=None, refreshed_source_ids=None):
     learn_ocr_aliases(connection)
     sources = select_sources(connection)
+    season_contexts = source_season_contexts(connection, sources)
     selected = {source["id"] for source in select_sources(connection, sequences)}
     refreshed = set(refreshed_source_ids or ())
     pending = {
@@ -1007,11 +1215,13 @@ def import_pending(connection, sequences=None, refreshed_source_ids=None):
         source["source_id"]: source
         for source in make_review(connection, source_ids=pending)["sources"]
     }
+    resolve_repeated_ocr_names(connection, documents)
     counts = {
         "imported_sources": 0,
         "imported_records": 0,
         "unchanged_sources": 0,
         "skipped_sources": [],
+        "ignored_sources": [],
     }
     current_match_id = None
     for source in sources:
@@ -1023,12 +1233,45 @@ def import_pending(connection, sequences=None, refreshed_source_ids=None):
             current_match_id = None
         document = documents.get(source["id"])
         if document is not None:
+            if not document["records"] and screen_type not in {
+                "match_facts",
+                "player_performance",
+                "goalkeeper_performance",
+                "squad",
+            }:
+                counts["ignored_sources"].append(
+                    {
+                        "path": source["path"],
+                        "reason": f"No supported statistics on {screen_type} screen; OCR retained for reference",
+                    }
+                )
+                with connection:
+                    connection.execute(
+                        "UPDATE source_images SET error = NULL WHERE id = ?",
+                        (source["id"],),
+                    )
+                continue
             try:
                 if not document["records"]:
                     raise ValueError(
                         f"No supported statistics detected on {screen_type} screen"
                     )
+                resolve_candidate_players(connection, document, strict=True)
                 for record in document["records"]:
+                    if record.get("type") in {
+                        "player_snapshot",
+                        "player_competition_snapshot",
+                        "competition_event",
+                    } and not record.get("season"):
+                        context = season_contexts.get(source["id"])
+                        if context:
+                            record["season"] = context[0]
+                            if record["type"] != "competition_event":
+                                record["date_basis"] = (
+                                    f"Season inferred from screenshot context: {context[1]}. "
+                                    "No exact observation date inferred."
+                                )
+                    resolve_award_context(connection, record, document["records"])
                     if (
                         record.get("type") == "player_match"
                         and not record.get("match_id")

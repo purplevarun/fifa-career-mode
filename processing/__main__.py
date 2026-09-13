@@ -183,15 +183,9 @@ def main(argv=None):
             imported = import_pending(connection, refreshed_source_ids=source_ids)
             errors = validate_database(connection)
             for skipped in imported["skipped_sources"]:
-                has_records = connection.execute(
-                    "SELECT 1 FROM extractions JOIN source_paths ON source_paths.source_id = extractions.source_id "
-                    "WHERE source_paths.path = ? AND json_array_length(extractions.candidate_json) > 0",
-                    (skipped["path"],),
-                ).fetchone()
-                if has_records:
-                    errors.append(
-                        f"Extracted statistics could not be imported: {skipped['path']}: {skipped['reason']}"
-                    )
+                errors.append(
+                    f"Extracted statistics could not be imported: {skipped['path']}: {skipped['reason']}"
+                )
             failed = bool(results["errors"] or errors)
             result = {
                 "database": str(database_path),

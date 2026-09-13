@@ -208,6 +208,88 @@ class NumericRecognitionTests(unittest.TestCase):
                 engine.text_recognizer.assert_called_once()
 
 
+class NameRecognitionTests(unittest.TestCase):
+    def setUp(self):
+        self.extractor = ScreenshotExtractor(engine=Mock())
+        self.image = Image.new("RGB", (1366, 768), "white")
+        self.fields = {
+            "first_name": {
+                "raw_text": "Elliott",
+                "confidence": 0.8,
+                "box": [175 / 1366, 139 / 768, 404 / 1366, 163 / 768],
+            },
+            "last_name": {
+                "raw_text": "HewittO",
+                "confidence": 0.8,
+                "box": [175 / 1366, 163 / 768, 404 / 1366, 190 / 768],
+            },
+        }
+        self.tokens = ocr_tokens(
+            [("Elliott", 177, 140, 240, 160), ("Hewitt", 177, 164, 251, 187)]
+        )
+
+    def test_agreeing_name_readings_preserve_original_evidence(self):
+        self.extractor.recognize = Mock(
+            return_value={
+                f"last_name.{padding}": {"raw_text": "Hewitt", "confidence": 0.85}
+                for padding in (0, 2, 4)
+            }
+        )
+
+        self.extractor.refine_name_fields(self.image, self.tokens, self.fields)
+
+        reading = self.fields["last_name"]
+        self.assertEqual(reading["raw_text"], "Hewitt")
+        self.assertEqual(reading["initial_reading"]["raw_text"], "HewittO")
+        self.assertEqual(reading["full_image_reading"], "Hewitt")
+
+    def test_disagreeing_or_low_confidence_name_retry_is_not_used(self):
+        for text, confidence in (("HewittO", 0.99), ("Hewitt", 0.74), ("Hewitt", 0.81)):
+            with self.subTest(text=text, confidence=confidence):
+                fields = dict(self.fields)
+                self.extractor.recognize = Mock(
+                    return_value={
+                        f"last_name.{padding}": {
+                            "raw_text": text,
+                            "confidence": confidence,
+                        }
+                        for padding in (0, 2, 4)
+                    }
+                )
+
+                self.extractor.refine_name_fields(self.image, self.tokens, fields)
+
+                self.assertEqual(fields["last_name"]["raw_text"], "HewittO")
+                self.assertNotIn("initial_reading", fields["last_name"])
+
+    def test_one_agreeing_crop_is_not_enough_to_change_a_name(self):
+        self.extractor.recognize = Mock(
+            return_value={
+                "last_name.0": {"raw_text": "Hewitt", "confidence": 0.99},
+                "last_name.2": {"raw_text": "HewittO", "confidence": 0.99},
+                "last_name.4": {"raw_text": "HewittO", "confidence": 0.99},
+            }
+        )
+
+        self.extractor.refine_name_fields(self.image, self.tokens, self.fields)
+
+        self.assertEqual(self.fields["last_name"]["raw_text"], "HewittO")
+        self.assertNotIn("initial_reading", self.fields["last_name"])
+
+    def test_unrelated_or_low_confidence_detected_names_are_not_used(self):
+        outside = ocr_tokens([("Hewitt", 700, 270, 800, 300)])
+        uncertain = [{**token, "confidence": 0.69} for token in self.tokens]
+        for tokens in (outside, uncertain):
+            with self.subTest(tokens=tokens):
+                fields = dict(self.fields)
+                self.extractor.recognize = Mock()
+
+                self.extractor.refine_name_fields(self.image, tokens, fields)
+
+                self.assertEqual(fields["last_name"]["raw_text"], "HewittO")
+                self.extractor.recognize.assert_not_called()
+
+
 class NonMatchExtractionTests(unittest.TestCase):
     def setUp(self):
         self.extractor = ScreenshotExtractor(engine=object())
@@ -333,7 +415,9 @@ class NonMatchExtractionTests(unittest.TestCase):
         self.assertEqual(award["player"], "Zoko")
         self.assertIsNone(award["competition"])
         self.assertIsNone(award["club"])
-        self.assertTrue(any("Confirm competition/season" in issue for issue in issues))
+        self.assertTrue(
+            any("Competition or season is not stated" in issue for issue in issues)
+        )
 
 
 @unittest.skipUnless(
@@ -442,6 +526,30 @@ class ScreenshotTests(unittest.TestCase):
                     self.assertEqual(
                         match["team_stats"][side], dict(zip(fields, expected_stats))
                     )
+
+    def test_name_readings_agree_with_detected_tight_crops(self):
+        for sequence, expected, refined in (
+            (31, "Elliott Hewitt", True),
+            (352, "Elliott Hewitt", True),
+            (915, "Leo Ostigard", True),
+            (1293, "Leo Ostigard", False),
+        ):
+            with self.subTest(sequence=sequence):
+                extraction = self.extractor.extract(
+                    self.root / "raw_screenshots" / f"{sequence}.png"
+                )
+                self.assertTrue(extraction["records"])
+                self.assertEqual(
+                    {record["player"] for record in extraction["records"]}, {expected}
+                )
+                reading = extraction["evidence"]["fields"]["last_name"]
+                self.assertEqual(
+                    reading["method"],
+                    "rapidocr_detected_name_consensus"
+                    if refined
+                    else "rapidocr_recognizer_crop",
+                )
+                self.assertEqual("initial_reading" in reading, refined)
 
     def test_squad_overall_snapshots(self):
         first = self.extract(1, self.extractor.extract_snapshot)

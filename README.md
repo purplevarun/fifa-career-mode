@@ -145,6 +145,13 @@ Three-copy and five-copy readings must agree before a digit is recovered; the
 original and retry readings remain in the OCR evidence. Blank or ambiguous cells
 stay unknown. Each rebuild uses the current OCR implementation on every image.
 
+Player names are also checked against text detected within their on-screen name
+fields. A conflicting name crop is changed only when two tighter crops agree with
+the full-image reading and meaningfully improve confidence; all readings are kept.
+Repeated, unambiguous corrections from at least two screenshots of the same club
+can resolve the same OCR name variant elsewhere in that run. Existing reviewed
+identities are not rewritten.
+
 Supported screens include:
 
 - Match/team stats, player performances, selected-player profiles and season totals.
@@ -153,8 +160,17 @@ Supported screens include:
 
 Offers still in negotiation and award shortlists are not treated as completed
 signings or wins. Missing years, selling clubs, fees and competition context stay
-unknown. Contract offers are not mistaken for transfer fees. News surnames are
-matched to existing players only when unambiguous.
+unknown unless related screenshot evidence resolves them unambiguously. Contract
+offers are not mistaken for transfer fees. News surnames are resolved again at
+import time, after earlier player records are available; ambiguous names are rejected.
+
+Undated profiles and season totals use compatible neighboring dated fixtures or
+competition tables to establish a season. Conflicting season boundaries are not
+guessed, and an exact observation date is never invented. Monthly awards can use
+the named player's recorded league appearances in the award month. A Golden Boot
+headline can use a same-screen championship and individual award only when their
+competition, season, and announcement date agree. Inferred context is retained in
+the import history and does not come from a saved-answer file.
 
 Player and goalkeeper screenshots are linked to the preceding match summary in
 numeric screenshot order. An unrelated or unrecognized screen breaks that
@@ -166,12 +182,15 @@ Append new screenshots with numbers above the current highest number, keeping
 each match summary before its player screenshots. Renumbering is safe only when
 the existing numeric order is preserved; alphabetical order is not equivalent.
 
-Each source is validated and saved in its own transaction. Unsupported screens,
-missing required context, and conflicting records are reported under
+Each source is validated and saved in its own transaction. Missing required
+context and conflicting records are reported under
 `import.skipped_sources`; they do not block attempts to import other valid
 screenshots. OCR failures, unimportable extracted records, and database validation
 errors produce a nonzero exit code and an incomplete result, not a rollback to
-the deleted database. Screens with no supported statistics can be skipped.
+the deleted database. Non-stat screens with no records are reported separately
+under `import.ignored_sources`; they do not make a successful run incomplete.
+Their OCR evidence is retained. Recognized statistics screens that yield no records
+still require attention and produce a nonzero exit code.
 Automatically imported values
 are not manually verified, so OCR mistakes that pass validation can still occur.
 
