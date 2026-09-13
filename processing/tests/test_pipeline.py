@@ -7,15 +7,33 @@ import sqlite3
 import subprocess
 import tempfile
 import unittest
-from contextlib import closing, redirect_stdout
+from contextlib import closing, redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import Mock, patch
 
 from PIL import Image
 
 from processing import EXTRACTOR_VERSION
-from processing.database import connect, coverage_report, insert_entity, inventory, status, validate_database
-from processing.pipeline import approve_review, backup_database, dashboard_data, ensure_club, ensure_edition, ensure_season, export_data, extract_pending, import_pending, make_review
+from processing.database import (
+    connect,
+    coverage_report,
+    insert_entity,
+    inventory,
+    status,
+    validate_database,
+)
+from processing.pipeline import (
+    approve_review,
+    backup_database,
+    dashboard_data,
+    ensure_club,
+    ensure_edition,
+    ensure_season,
+    export_data,
+    extract_pending,
+    import_pending,
+    make_review,
+)
 from processing.batch_review import fixture_contexts, prepare_player_cores
 from processing.identifiers import is_uuid, new_id
 from processing.extraction import parse_news_event
@@ -39,15 +57,25 @@ class DatabaseTestCase(unittest.TestCase):
 
     def create_match(self):
         self.season_id = ensure_season(self.connection, "2018/19")
-        self.edition_id = ensure_edition(self.connection, {"competition": "European International Cup", "season": "2018/19"})
+        self.edition_id = ensure_edition(
+            self.connection,
+            {"competition": "European International Cup", "season": "2018/19"},
+        )
         self.home_club_id = ensure_club(self.connection, "Notts County")
         self.away_club_id = ensure_club(self.connection, "Dundee FC")
         self.other_club_id = ensure_club(self.connection, "Other Club")
-        self.match_id = insert_entity(self.connection, "matches", {
-            "competition_season_id": self.edition_id, "played_on": "2018-07-04",
-            "home_club_id": self.home_club_id, "away_club_id": self.away_club_id,
-            "home_goals": 1, "away_goals": 1,
-        })
+        self.match_id = insert_entity(
+            self.connection,
+            "matches",
+            {
+                "competition_season_id": self.edition_id,
+                "played_on": "2018-07-04",
+                "home_club_id": self.home_club_id,
+                "away_club_id": self.away_club_id,
+                "home_goals": 1,
+                "away_goals": 1,
+            },
+        )
         return self.match_id
 
     def create_player(self, name="Aaron Ramsdale"):
@@ -58,18 +86,37 @@ class DatabaseTests(DatabaseTestCase):
     def test_uuid_database_reopen_preserves_existing_records(self):
         match_id = self.create_match()
         player_id = self.create_player()
-        appearance_id = insert_entity(self.connection, "player_matches", {
-            "match_id": match_id, "player_id": player_id, "club_id": self.home_club_id,
-            "goals_conceded": 2, "goals_conceded_displayed": 2,
-        })
+        appearance_id = insert_entity(
+            self.connection,
+            "player_matches",
+            {
+                "match_id": match_id,
+                "player_id": player_id,
+                "club_id": self.home_club_id,
+                "goals_conceded": 2,
+                "goals_conceded_displayed": 2,
+            },
+        )
         self.connection.commit()
         self.connection.close()
         self.connection = connect(self.root / "career.sqlite")
         self.addCleanup(self.connection.close)
-        self.assertEqual(self.connection.execute("PRAGMA user_version").fetchone()[0], 3)
-        self.assertEqual(self.connection.execute("SELECT id FROM player_matches").fetchone()[0], appearance_id)
+        self.assertEqual(
+            self.connection.execute("PRAGMA user_version").fetchone()[0], 3
+        )
+        self.assertEqual(
+            self.connection.execute("SELECT id FROM player_matches").fetchone()[0],
+            appearance_id,
+        )
         self.assertTrue(is_uuid(appearance_id))
-        self.assertEqual(tuple(self.connection.execute("SELECT goals_conceded, goals_conceded_displayed FROM player_matches").fetchone()), (2, 2))
+        self.assertEqual(
+            tuple(
+                self.connection.execute(
+                    "SELECT goals_conceded, goals_conceded_displayed FROM player_matches"
+                ).fetchone()
+            ),
+            (2, 2),
+        )
         self.assertEqual(validate_database(self.connection), [])
 
     def test_empty_coverage_has_no_invented_matches(self):
@@ -81,14 +128,24 @@ class DatabaseTests(DatabaseTestCase):
     def test_dashboard_contains_stats_without_screenshot_references(self):
         self.create_image()
         inventory(self.connection, self.root)
-        source_id = self.connection.execute("SELECT id FROM source_images").fetchone()[0]
+        source_id = self.connection.execute("SELECT id FROM source_images").fetchone()[
+            0
+        ]
         match_id = self.create_match()
         player_id = self.create_player()
-        insert_entity(self.connection, "player_snapshots", {
-            "player_id": player_id, "season_id": self.season_id, "source_id": source_id,
-            "snapshot_kind": "first_observed", "date_precision": "season",
-            "date_basis": "Screenshot (73).png", "overall": 62,
-        })
+        insert_entity(
+            self.connection,
+            "player_snapshots",
+            {
+                "player_id": player_id,
+                "season_id": self.season_id,
+                "source_id": source_id,
+                "snapshot_kind": "first_observed",
+                "date_precision": "season",
+                "date_basis": "Screenshot (73).png",
+                "overall": 62,
+            },
+        )
         dataset = dashboard_data(self.connection)
         self.assertEqual(dataset["matches"][0]["id"], match_id)
         self.assertEqual(dataset["player_snapshots"][0]["overall"], 62)
@@ -130,9 +187,13 @@ class DatabaseTests(DatabaseTestCase):
         self.raw = self.raw.rename(self.root / "raw_screenshots")
         original = self.raw / original.name
         inventory(self.connection, self.root)
-        source_id = self.connection.execute("SELECT id FROM source_images").fetchone()[0]
+        source_id = self.connection.execute("SELECT id FROM source_images").fetchone()[
+            0
+        ]
         match_id = self.create_match()
-        self.connection.execute("INSERT INTO match_sources VALUES (?, ?)", (match_id, source_id))
+        self.connection.execute(
+            "INSERT INTO match_sources VALUES (?, ?)", (match_id, source_id)
+        )
         self.connection.execute("UPDATE source_images SET status = 'imported'")
         self.connection.commit()
 
@@ -144,12 +205,19 @@ class DatabaseTests(DatabaseTestCase):
         Image.new("RGB", (40, 20), "black").save(original)
         self.assertEqual(inventory(self.connection, self.root)["new_images"], 1)
         self.assertEqual(status(self.connection)["source_images"], 2)
-        self.assertEqual(self.connection.execute("SELECT source_id FROM match_sources").fetchone()[0], source_id)
+        self.assertEqual(
+            self.connection.execute("SELECT source_id FROM match_sources").fetchone()[
+                0
+            ],
+            source_id,
+        )
 
         original.unlink()
         (self.raw / "renamed.png").write_bytes(original_bytes)
         self.assertEqual(inventory(self.connection, self.root)["new_images"], 0)
-        self.assertEqual(status(self.connection)["source_states"], {"imported": 1, "inventoried": 1})
+        self.assertEqual(
+            status(self.connection)["source_states"], {"imported": 1, "inventoried": 1}
+        )
         self.assertEqual(validate_database(self.connection), [])
 
     def test_corrupt_image_is_reported(self):
@@ -158,29 +226,66 @@ class DatabaseTests(DatabaseTestCase):
         self.assertEqual(status(self.connection)["source_states"], {"error": 1})
 
     def test_competitions_require_boolean_preseason(self):
-        self.assertEqual(self.connection.execute(
-            "SELECT COUNT(*) FROM competitions WHERE is_preseason = 1"
-        ).fetchone()[0], 2)
+        self.assertEqual(
+            self.connection.execute(
+                "SELECT COUNT(*) FROM competitions WHERE is_preseason = 1"
+            ).fetchone()[0],
+            2,
+        )
         with self.assertRaises(sqlite3.IntegrityError):
-            insert_entity(self.connection, "competitions", {"name": "Invalid", "kind": "cup", "is_preseason": 2})
+            insert_entity(
+                self.connection,
+                "competitions",
+                {"name": "Invalid", "kind": "cup", "is_preseason": 2},
+            )
 
     def test_matches_cannot_have_missing_competition(self):
         self.create_match()
         for edition in (None, new_id()):
             with self.assertRaises(sqlite3.IntegrityError):
-                insert_entity(self.connection, "matches", {
-                    "competition_season_id": edition, "played_on": "2018-07-05",
-                    "home_club_id": self.home_club_id, "away_club_id": self.away_club_id,
-                })
+                insert_entity(
+                    self.connection,
+                    "matches",
+                    {
+                        "competition_season_id": edition,
+                        "played_on": "2018-07-05",
+                        "home_club_id": self.home_club_id,
+                        "away_club_id": self.away_club_id,
+                    },
+                )
 
     def test_appearance_must_belong_to_participating_club(self):
         match_id = self.create_match()
         player_id = self.create_player("Takefusa Kubo")
         with self.assertRaises(sqlite3.IntegrityError):
-            insert_entity(self.connection, "player_matches", {"match_id": match_id, "player_id": player_id, "club_id": self.other_club_id})
-        insert_entity(self.connection, "player_matches", {"match_id": match_id, "player_id": player_id, "club_id": self.home_club_id})
+            insert_entity(
+                self.connection,
+                "player_matches",
+                {
+                    "match_id": match_id,
+                    "player_id": player_id,
+                    "club_id": self.other_club_id,
+                },
+            )
+        insert_entity(
+            self.connection,
+            "player_matches",
+            {
+                "match_id": match_id,
+                "player_id": player_id,
+                "club_id": self.home_club_id,
+            },
+        )
         with self.assertRaises(sqlite3.IntegrityError):
-            insert_entity(self.connection, "player_matches", {"match_id": match_id, "player_id": player_id, "club_id": self.home_club_id})
+            insert_entity(
+                self.connection,
+                "player_matches",
+                {
+                    "match_id": match_id,
+                    "player_id": player_id,
+                    "club_id": self.home_club_id,
+                },
+            )
         self.assertEqual(validate_database(self.connection), [])
 
     def test_snapshot_requires_supported_date_precision(self):
@@ -188,31 +293,66 @@ class DatabaseTests(DatabaseTestCase):
         inventory(self.connection, self.root)
         self.create_match()
         player_id = self.create_player()
-        source_id = self.connection.execute("SELECT id FROM source_images").fetchone()[0]
-        snapshot = {"player_id": player_id, "season_id": self.season_id, "source_id": source_id,
-                    "snapshot_kind": "season_start", "date_precision": "day", "date_basis": "Date missing"}
+        source_id = self.connection.execute("SELECT id FROM source_images").fetchone()[
+            0
+        ]
+        snapshot = {
+            "player_id": player_id,
+            "season_id": self.season_id,
+            "source_id": source_id,
+            "snapshot_kind": "season_start",
+            "date_precision": "day",
+            "date_basis": "Date missing",
+        }
         with self.assertRaises(sqlite3.IntegrityError):
             insert_entity(self.connection, "player_snapshots", snapshot)
-        insert_entity(self.connection, "player_snapshots", {
-            **snapshot, "snapshot_kind": "first_observed", "date_precision": "season",
-            "date_basis": "Opening squad screen, exact day unknown", "overall": 62,
-        })
-        self.assertEqual(self.connection.execute("SELECT observed_on FROM player_snapshots").fetchone()[0], None)
+        insert_entity(
+            self.connection,
+            "player_snapshots",
+            {
+                **snapshot,
+                "snapshot_kind": "first_observed",
+                "date_precision": "season",
+                "date_basis": "Opening squad screen, exact day unknown",
+                "overall": 62,
+            },
+        )
+        self.assertEqual(
+            self.connection.execute(
+                "SELECT observed_on FROM player_snapshots"
+            ).fetchone()[0],
+            None,
+        )
 
 
 class ImportTests(DatabaseTestCase):
     def prepare_source(self, sequence, color):
         self.create_image(f"Screenshot ({sequence}).png", color)
         inventory(self.connection, self.root)
-        return self.connection.execute("SELECT source_id FROM source_paths WHERE sequence = ?", (sequence,)).fetchone()[0]
+        return self.connection.execute(
+            "SELECT source_id FROM source_paths WHERE sequence = ?", (sequence,)
+        ).fetchone()[0]
 
     def review(self, source_id, records, complete=True):
-        return {"schema_version": 3, "sources": [{"source_id": source_id, "complete": complete, "records": records}]}
+        return {
+            "schema_version": 3,
+            "sources": [
+                {"source_id": source_id, "complete": complete, "records": records}
+            ],
+        }
 
     def match_record(self):
-        return {"type": "match", "competition": "European International Cup", "season": "2018/19",
-                "played_on": "2018-07-04", "home_club": "Notts County", "away_club": "Dundee FC",
-                "home_goals": 1, "away_goals": 1, "team_stats": {"home": {"shots": 6}, "away": {"fouls": 0}}}
+        return {
+            "type": "match",
+            "competition": "European International Cup",
+            "season": "2018/19",
+            "played_on": "2018-07-04",
+            "home_club": "Notts County",
+            "away_club": "Dundee FC",
+            "home_goals": 1,
+            "away_goals": 1,
+            "team_stats": {"home": {"shots": 6}, "away": {"fouls": 0}},
+        }
 
     def approved_match(self):
         source_id = self.prepare_source(73, "white")
@@ -229,23 +369,41 @@ class ImportTests(DatabaseTestCase):
         self.assertEqual(result["skipped_reviews"], 1)
         self.assertEqual(status(self.connection)["records"]["matches"], 1)
         self.assertEqual(status(self.connection)["records"]["team_matches"], 2)
-        self.assertEqual(self.connection.execute(
-            "SELECT is_preseason FROM competitions JOIN competition_seasons ON competition_id = competitions.id "
-            "JOIN matches ON competition_season_id = competition_seasons.id"
-        ).fetchone()[0], 1)
+        self.assertEqual(
+            self.connection.execute(
+                "SELECT is_preseason FROM competitions JOIN competition_seasons ON competition_id = competitions.id "
+                "JOIN matches ON competition_season_id = competition_seasons.id"
+            ).fetchone()[0],
+            1,
+        )
 
     def test_different_capture_merges_same_match(self):
         self.approved_match()
         source_id = self.prepare_source(74, "gray")
-        approve_review(self.connection, self.review(source_id, [self.match_record()]), "Duplicate capture, visually checked")
+        approve_review(
+            self.connection,
+            self.review(source_id, [self.match_record()]),
+            "Duplicate capture, visually checked",
+        )
         self.assertEqual(status(self.connection)["records"]["matches"], 1)
-        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM match_sources").fetchone()[0], 2)
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM match_sources").fetchone()[0],
+            2,
+        )
 
     def test_player_import_links_match_and_preserves_history(self):
         match_source, document = self.approved_match()
         player_source = self.prepare_source(76, "black")
-        player = {"type": "player_match", "match_source_id": match_source, "player": "Takefusa Kubo",
-                  "club": "Notts County", "overall": 63, "rating": 8.4, "goals": 0, "assists": 1}
+        player = {
+            "type": "player_match",
+            "match_source_id": match_source,
+            "player": "Takefusa Kubo",
+            "club": "Notts County",
+            "overall": 63,
+            "rating": 8.4,
+            "goals": 0,
+            "assists": 1,
+        }
         review = self.review(player_source, [player])
         approve_review(self.connection, review, "Player and fixture checked")
         approve_review(self.connection, review, "Rerun")
@@ -255,7 +413,11 @@ class ImportTests(DatabaseTestCase):
         self.assertEqual(snapshot["observed_on"], "2018-07-04")
         self.assertEqual(snapshot["snapshot_kind"], "in_season")
         extra_source = self.prepare_source(77, "blue")
-        approve_review(self.connection, self.review(extra_source, [player]), "Same player, second capture")
+        approve_review(
+            self.connection,
+            self.review(extra_source, [player]),
+            "Same player, second capture",
+        )
         self.assertEqual(status(self.connection)["records"]["player_snapshots"], 1)
 
     def test_conflicts_require_explicit_correction(self):
@@ -264,64 +426,119 @@ class ImportTests(DatabaseTestCase):
         corrected["sources"][0]["records"][0]["home_goals"] = 2
         with self.assertRaisesRegex(ValueError, "Conflict"):
             approve_review(self.connection, corrected, "Unapproved conflicting value")
-        self.assertEqual(self.connection.execute("SELECT home_goals FROM matches").fetchone()[0], 1)
-        approve_review(self.connection, corrected, "Intentional visual correction", replace_reviewed=True)
-        self.assertEqual(self.connection.execute("SELECT home_goals FROM matches").fetchone()[0], 2)
-        approve_review(self.connection, original, "Older review must not undo newer correction")
-        self.assertEqual(self.connection.execute("SELECT home_goals FROM matches").fetchone()[0], 2)
+        self.assertEqual(
+            self.connection.execute("SELECT home_goals FROM matches").fetchone()[0], 1
+        )
+        approve_review(
+            self.connection,
+            corrected,
+            "Intentional visual correction",
+            replace_reviewed=True,
+        )
+        self.assertEqual(
+            self.connection.execute("SELECT home_goals FROM matches").fetchone()[0], 2
+        )
+        approve_review(
+            self.connection, original, "Older review must not undo newer correction"
+        )
+        self.assertEqual(
+            self.connection.execute("SELECT home_goals FROM matches").fetchone()[0], 2
+        )
 
     def test_failed_batch_rolls_back_all_records(self):
         source_id = self.prepare_source(73, "white")
-        bad_player = {"type": "player_match", "match_id": 999, "player": "Unknown", "club": "Notts County"}
+        bad_player = {
+            "type": "player_match",
+            "match_id": 999,
+            "player": "Unknown",
+            "club": "Notts County",
+        }
         with self.assertRaises(ValueError):
-            approve_review(self.connection, self.review(source_id, [self.match_record(), bad_player]), "Invalid batch")
+            approve_review(
+                self.connection,
+                self.review(source_id, [self.match_record(), bad_player]),
+                "Invalid batch",
+            )
         self.assertEqual(status(self.connection)["records"]["matches"], 0)
         self.assertEqual(status(self.connection)["records"]["clubs"], 0)
-        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM reviews").fetchone()[0], 0)
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM reviews").fetchone()[0], 0
+        )
 
     def test_unknown_fields_and_string_numbers_are_rejected(self):
         source_id = self.prepare_source(73, "white")
         for update in ({"home_goals": "1"}, {"home_goal": 1}, {"home_goals": True}):
             with self.assertRaises(ValueError):
-                approve_review(self.connection, self.review(source_id, [{**self.match_record(), **update}]), "Invalid data")
+                approve_review(
+                    self.connection,
+                    self.review(source_id, [{**self.match_record(), **update}]),
+                    "Invalid data",
+                )
         self.assertEqual(status(self.connection)["records"]["matches"], 0)
 
     def test_match_date_must_belong_to_its_competition_season(self):
         source_id = self.prepare_source(73, "white")
         record = {**self.match_record(), "season": "2019/20"}
         with self.assertRaisesRegex(ValueError, "outside"):
-            approve_review(self.connection, self.review(source_id, [record]), "Wrong season")
+            approve_review(
+                self.connection, self.review(source_id, [record]), "Wrong season"
+            )
         self.assertEqual(status(self.connection)["records"]["matches"], 0)
 
     def test_new_competition_requires_explicit_classification(self):
         source_id = self.prepare_source(73, "white")
         record = {**self.match_record(), "competition": "Preseason Friendlies"}
         with self.assertRaises(ValueError):
-            approve_review(self.connection, self.review(source_id, [record]), "Missing classification")
+            approve_review(
+                self.connection,
+                self.review(source_id, [record]),
+                "Missing classification",
+            )
         record.update(is_preseason=True, competition_kind="friendly")
-        approve_review(self.connection, self.review(source_id, [record]), "Verified standalone preseason friendly")
+        approve_review(
+            self.connection,
+            self.review(source_id, [record]),
+            "Verified standalone preseason friendly",
+        )
         self.assertEqual(status(self.connection)["records"]["matches"], 1)
 
     def test_club_alias_resolves_to_same_uuid_without_duplicate_club(self):
         self.approved_match()
-        self.connection.execute("INSERT INTO club_aliases(alias, club_id) VALUES (?, ?)", ("nottscounty", self.home_club_id))
+        self.connection.execute(
+            "INSERT INTO club_aliases(alias, club_id) VALUES (?, ?)",
+            ("nottscounty", self.home_club_id),
+        )
         self.assertEqual(ensure_club(self.connection, "NottsCounty"), self.home_club_id)
-        self.assertEqual(ensure_club(self.connection, "NOTTS COUNTY"), self.home_club_id)
+        self.assertEqual(
+            ensure_club(self.connection, "NOTTS COUNTY"), self.home_club_id
+        )
         self.assertTrue(is_uuid(self.home_club_id))
-        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM clubs").fetchone()[0], 2)
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM clubs").fetchone()[0], 2
+        )
 
     def test_extraction_never_overwrites_approved_data(self):
         source_id, document = self.approved_match()
 
         class FakeExtractor:
             def extract(self, path):
-                return {"screen_type": "match_facts", "records": [{"type": "match", "home_goals": 99}],
-                        "evidence": {}, "issues": ["Synthetic bad OCR"]}
+                return {
+                    "screen_type": "match_facts",
+                    "records": [{"type": "match", "home_goals": 99}],
+                    "evidence": {},
+                    "issues": ["Synthetic bad OCR"],
+                }
 
-        result = extract_pending(self.connection, self.root, {73}, extractor=FakeExtractor())
+        result = extract_pending(
+            self.connection, self.root, {73}, extractor=FakeExtractor()
+        )
         self.assertEqual(result["extracted"], 1)
-        self.assertEqual(self.connection.execute("SELECT home_goals FROM matches").fetchone()[0], 1)
-        result = extract_pending(self.connection, self.root, {73}, extractor=FakeExtractor())
+        self.assertEqual(
+            self.connection.execute("SELECT home_goals FROM matches").fetchone()[0], 1
+        )
+        result = extract_pending(
+            self.connection, self.root, {73}, extractor=FakeExtractor()
+        )
         self.assertEqual(result["skipped"], 1)
         review = make_review(self.connection, {73})
         self.assertEqual(review["sources"][0]["records"][0]["home_goals"], 1)
@@ -329,52 +546,130 @@ class ImportTests(DatabaseTestCase):
     def test_new_non_match_layouts_refresh_once_without_touching_reviewed_stats(self):
         match_source, document = self.approved_match()
         transfer_source = self.prepare_source(1124, "black")
-        transfer = {"type": "player_transfer", "player": "Test Player", "to_club": "Notts County",
-                    "transfer_type": "permanent", "date_basis": "Year unknown", "contract_months": 24}
-        approve_review(self.connection, self.review(transfer_source, [transfer]), "Reviewed signing")
-        for source_id, screen_type in ((match_source, "match_facts"), (transfer_source, "transfer")):
-            self.connection.execute("UPDATE source_images SET screen_type = ? WHERE id = ?", (screen_type, source_id))
+        transfer = {
+            "type": "player_transfer",
+            "player": "Test Player",
+            "to_club": "Notts County",
+            "transfer_type": "permanent",
+            "date_basis": "Year unknown",
+            "contract_months": 24,
+        }
+        approve_review(
+            self.connection,
+            self.review(transfer_source, [transfer]),
+            "Reviewed signing",
+        )
+        for source_id, screen_type in (
+            (match_source, "match_facts"),
+            (transfer_source, "transfer"),
+        ):
+            self.connection.execute(
+                "UPDATE source_images SET screen_type = ? WHERE id = ?",
+                (screen_type, source_id),
+            )
             self.connection.execute(
                 "INSERT INTO extractions(source_id, extractor_version, candidate_json, evidence_json, issues_json) VALUES (?, '1.1.0', '[]', '{}', '[]')",
                 (source_id,),
             )
         self.connection.commit()
-        before = tuple(self.connection.execute("SELECT * FROM player_transfers").fetchone())
-        reviewed = [tuple(row) for row in self.connection.execute("SELECT * FROM reviews ORDER BY id")]
+        before = tuple(
+            self.connection.execute("SELECT * FROM player_transfers").fetchone()
+        )
+        reviewed = [
+            tuple(row)
+            for row in self.connection.execute("SELECT * FROM reviews ORDER BY id")
+        ]
         extractor = Mock()
-        extractor.extract.return_value = {"screen_type": "transfer", "records": [{**transfer, "contract_months": 99}], "evidence": {}, "issues": []}
+        extractor.extract.return_value = {
+            "screen_type": "transfer",
+            "records": [{**transfer, "contract_months": 99}],
+            "evidence": {},
+            "issues": [],
+        }
         result = extract_pending(self.connection, self.root, extractor=extractor)
         self.assertEqual((result["extracted"], result["skipped"]), (1, 1))
         self.assertEqual(result["processed_source_ids"], [transfer_source])
-        self.assertEqual(tuple(self.connection.execute("SELECT * FROM player_transfers").fetchone()), before)
-        self.assertEqual([tuple(row) for row in self.connection.execute("SELECT * FROM reviews ORDER BY id")], reviewed)
-        self.assertEqual(self.connection.execute("SELECT extractor_version FROM extractions WHERE source_id = ?", (transfer_source,)).fetchone()[0], EXTRACTOR_VERSION)
-        self.assertEqual(self.connection.execute("SELECT extractor_version FROM extractions WHERE source_id = ?", (match_source,)).fetchone()[0], "1.1.0")
+        self.assertEqual(
+            tuple(self.connection.execute("SELECT * FROM player_transfers").fetchone()),
+            before,
+        )
+        self.assertEqual(
+            [
+                tuple(row)
+                for row in self.connection.execute("SELECT * FROM reviews ORDER BY id")
+            ],
+            reviewed,
+        )
+        self.assertEqual(
+            self.connection.execute(
+                "SELECT extractor_version FROM extractions WHERE source_id = ?",
+                (transfer_source,),
+            ).fetchone()[0],
+            EXTRACTOR_VERSION,
+        )
+        self.assertEqual(
+            self.connection.execute(
+                "SELECT extractor_version FROM extractions WHERE source_id = ?",
+                (match_source,),
+            ).fetchone()[0],
+            "1.1.0",
+        )
         second = extract_pending(self.connection, self.root, extractor=extractor)
         self.assertEqual((second["extracted"], second["skipped"]), (0, 2))
         self.assertEqual(extractor.extract.call_count, 1)
-        self.assertEqual(make_review(self.connection, {1124})["sources"][0]["records"][0]["contract_months"], 24)
+        self.assertEqual(
+            make_review(self.connection, {1124})["sources"][0]["records"][0][
+                "contract_months"
+            ],
+            24,
+        )
 
     def test_failed_layout_refresh_retries_without_marking_it_current(self):
         source_id = self.prepare_source(328, "white")
-        self.connection.execute("UPDATE source_images SET screen_type = 'news' WHERE id = ?", (source_id,))
+        self.connection.execute(
+            "UPDATE source_images SET screen_type = 'news' WHERE id = ?", (source_id,)
+        )
         self.connection.execute(
             "INSERT INTO extractions(source_id, extractor_version, candidate_json, evidence_json, issues_json) VALUES (?, '1.1.0', '[]', '{}', '[]')",
             (source_id,),
         )
         self.connection.commit()
         extractor = Mock()
-        extractor.extract.side_effect = [ValueError("OCR interrupted"), {"screen_type": "news", "records": [], "evidence": {}, "issues": []}]
-        self.assertEqual(extract_pending(self.connection, self.root, extractor=extractor)["errors"], 1)
-        self.assertEqual(self.connection.execute("SELECT extractor_version FROM extractions").fetchone()[0], "1.1.0")
-        self.assertEqual(extract_pending(self.connection, self.root, extractor=extractor)["extracted"], 1)
+        extractor.extract.side_effect = [
+            ValueError("OCR interrupted"),
+            {"screen_type": "news", "records": [], "evidence": {}, "issues": []},
+        ]
+        self.assertEqual(
+            extract_pending(self.connection, self.root, extractor=extractor)["errors"],
+            1,
+        )
+        self.assertEqual(
+            self.connection.execute(
+                "SELECT extractor_version FROM extractions"
+            ).fetchone()[0],
+            "1.1.0",
+        )
+        self.assertEqual(
+            extract_pending(self.connection, self.root, extractor=extractor)[
+                "extracted"
+            ],
+            1,
+        )
 
     def test_only_dashboard_award_tiles_are_refreshed(self):
         award_source = self.prepare_source(823, "white")
         ordinary_source = self.prepare_source(824, "black")
-        for source_id, text in ((award_source, "STANDINGS Williams grabs January Player of the Month Award"),
-                                (ordinary_source, "Mr. Kedia STANDINGS TRANSFER HUB")):
-            self.connection.execute("UPDATE source_images SET screen_type = 'dashboard' WHERE id = ?", (source_id,))
+        for source_id, text in (
+            (
+                award_source,
+                "STANDINGS Williams grabs January Player of the Month Award",
+            ),
+            (ordinary_source, "Mr. Kedia STANDINGS TRANSFER HUB"),
+        ):
+            self.connection.execute(
+                "UPDATE source_images SET screen_type = 'dashboard' WHERE id = ?",
+                (source_id,),
+            )
             evidence = json.dumps({"full_image_tokens": [{"text": text}]})
             self.connection.execute(
                 "INSERT INTO extractions(source_id, extractor_version, candidate_json, evidence_json, issues_json) VALUES (?, '1.1.0', '[]', ?, '[]')",
@@ -382,7 +677,12 @@ class ImportTests(DatabaseTestCase):
             )
         self.connection.commit()
         extractor = Mock()
-        extractor.extract.return_value = {"screen_type": "dashboard_award", "records": [], "evidence": {}, "issues": []}
+        extractor.extract.return_value = {
+            "screen_type": "dashboard_award",
+            "records": [],
+            "evidence": {},
+            "issues": [],
+        }
         result = extract_pending(self.connection, self.root, extractor=extractor)
         self.assertEqual(result["processed_source_ids"], [award_source])
         self.assertEqual((result["extracted"], result["skipped"]), (1, 1))
@@ -391,19 +691,41 @@ class ImportTests(DatabaseTestCase):
         source_id = self.prepare_source(328, "white")
         player_id = self.create_player("Andy King")
         self.connection.commit()
-        candidate = parse_news_event("King grabs August Player of the Month Award",
-                                     "King's impressive performance for Notts County earned him the EFL League Two award.", "2018-09-05")
+        candidate = parse_news_event(
+            "King grabs August Player of the Month Award",
+            "King's impressive performance for Notts County earned him the EFL League Two award.",
+            "2018-09-05",
+        )
         extractor = Mock()
-        extractor.extract.return_value = {"screen_type": "news", "records": [candidate], "evidence": {}, "issues": []}
+        extractor.extract.return_value = {
+            "screen_type": "news",
+            "records": [candidate],
+            "evidence": {},
+            "issues": [],
+        }
         extract_pending(self.connection, self.root, extractor=extractor)
         review = make_review(self.connection, {328})
         record = review["sources"][0]["records"][0]
-        self.assertEqual((record["player"], record["player_id"]), ("Andy King", player_id))
-        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM competition_events").fetchone()[0], 0)
+        self.assertEqual(
+            (record["player"], record["player_id"]), ("Andy King", player_id)
+        )
+        self.assertEqual(
+            self.connection.execute(
+                "SELECT COUNT(*) FROM competition_events"
+            ).fetchone()[0],
+            0,
+        )
         approve_review(self.connection, review, "Checked monthly award")
         approve_review(self.connection, review, "Repeat")
-        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM players").fetchone()[0], 1)
-        self.assertEqual(self.connection.execute("SELECT player_id, period FROM competition_events").fetchone()[:], (player_id, "2018-08"))
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM players").fetchone()[0], 1
+        )
+        self.assertEqual(
+            self.connection.execute(
+                "SELECT player_id, period FROM competition_events"
+            ).fetchone()[:],
+            (player_id, "2018-08"),
+        )
         self.assertEqual(len(dashboard_data(self.connection)["competition_events"]), 1)
 
     def test_news_ocr_does_not_choose_between_players_with_same_surname(self):
@@ -411,51 +733,115 @@ class ImportTests(DatabaseTestCase):
         self.create_player("Andy King")
         self.create_player("Joshua King")
         self.connection.commit()
-        candidate = parse_news_event("King grabs August Player of the Month Award", announced_on="2018-09-05")
+        candidate = parse_news_event(
+            "King grabs August Player of the Month Award", announced_on="2018-09-05"
+        )
         extractor = Mock()
-        extractor.extract.return_value = {"screen_type": "news", "records": [candidate], "evidence": {}, "issues": []}
+        extractor.extract.return_value = {
+            "screen_type": "news",
+            "records": [candidate],
+            "evidence": {},
+            "issues": [],
+        }
         extract_pending(self.connection, self.root, extractor=extractor)
         source = make_review(self.connection, {328})["sources"][0]
         self.assertNotIn("player_id", source["records"][0])
         self.assertEqual(source["records"][0]["player"], "King")
-        self.assertTrue(any("Ambiguous OCR player" in issue for issue in source["issues"]))
-        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM players").fetchone()[0], 2)
+        self.assertTrue(
+            any("Ambiguous OCR player" in issue for issue in source["issues"])
+        )
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM players").fetchone()[0], 2
+        )
 
     def test_refreshed_news_adds_new_awards_without_replacing_reviewed_values(self):
         source_id = self.prepare_source(1053, "white")
-        reviewed = {"type": "competition_event", "event_type": "goalkeeper_of_the_competition",
-                    "player": "Aaron Ramsdale", "club": "Notts County", "competition": "EFL League Two",
-                    "season": "2018/19", "period": "2018/19", "announced_on": "2019-05-04", "description": "Reviewed award"}
-        approve_review(self.connection, self.review(source_id, [reviewed]), "Existing checked award")
-        before = tuple(self.connection.execute("SELECT * FROM competition_events").fetchone())
+        reviewed = {
+            "type": "competition_event",
+            "event_type": "goalkeeper_of_the_competition",
+            "player": "Aaron Ramsdale",
+            "club": "Notts County",
+            "competition": "EFL League Two",
+            "season": "2018/19",
+            "period": "2018/19",
+            "announced_on": "2019-05-04",
+            "description": "Reviewed award",
+        }
+        approve_review(
+            self.connection,
+            self.review(source_id, [reviewed]),
+            "Existing checked award",
+        )
+        before = tuple(
+            self.connection.execute("SELECT * FROM competition_events").fetchone()
+        )
         news = {**reviewed, "description": "Fresh OCR wording"}
-        champion = {"type": "competition_event", "event_type": "champion", "club": "Notts County",
-                    "competition": "EFL League Two", "season": "2018/19", "period": "2018/19",
-                    "announced_on": "2019-05-04", "description": "Notts County Crowned EFL League Two Champions"}
+        champion = {
+            "type": "competition_event",
+            "event_type": "champion",
+            "club": "Notts County",
+            "competition": "EFL League Two",
+            "season": "2018/19",
+            "period": "2018/19",
+            "announced_on": "2019-05-04",
+            "description": "Notts County Crowned EFL League Two Champions",
+        }
         extractor = Mock()
-        extractor.extract.return_value = {"screen_type": "news", "records": [news, champion], "evidence": {}, "issues": []}
+        extractor.extract.return_value = {
+            "screen_type": "news",
+            "records": [news, champion],
+            "evidence": {},
+            "issues": [],
+        }
         extract_pending(self.connection, self.root, extractor=extractor)
         source = make_review(self.connection, {1053})["sources"][0]
         self.assertEqual(len(source["records"]), 2)
         self.assertEqual(source["records"][0]["description"], "Reviewed award")
         self.assertEqual(source["records"][1]["event_type"], "champion")
         self.assertFalse(source["complete"])
-        self.assertEqual(tuple(self.connection.execute("SELECT * FROM competition_events").fetchone()), before)
+        self.assertEqual(
+            tuple(
+                self.connection.execute("SELECT * FROM competition_events").fetchone()
+            ),
+            before,
+        )
 
-    def test_new_transfer_ocr_proposes_unknown_wage_without_changing_saved_contract(self):
+    def test_new_transfer_ocr_proposes_unknown_wage_without_changing_saved_contract(
+        self,
+    ):
         source_id = self.prepare_source(1124, "white")
-        transfer = {"type": "player_transfer", "player": "Matty James", "to_club": "Notts County",
-                    "transfer_type": "permanent", "date_basis": "Year unknown", "contract_months": 24, "weekly_wage_minor": None}
-        approve_review(self.connection, self.review(source_id, [transfer]), "Reviewed signing")
+        transfer = {
+            "type": "player_transfer",
+            "player": "Matty James",
+            "to_club": "Notts County",
+            "transfer_type": "permanent",
+            "date_basis": "Year unknown",
+            "contract_months": 24,
+            "weekly_wage_minor": None,
+        }
+        approve_review(
+            self.connection, self.review(source_id, [transfer]), "Reviewed signing"
+        )
         extractor = Mock()
-        extractor.extract.return_value = {"screen_type": "transfer", "records": [{**transfer, "weekly_wage_minor": 3599900, "contract_months": 99}], "evidence": {}, "issues": []}
+        extractor.extract.return_value = {
+            "screen_type": "transfer",
+            "records": [
+                {**transfer, "weekly_wage_minor": 3599900, "contract_months": 99}
+            ],
+            "evidence": {},
+            "issues": [],
+        }
         extract_pending(self.connection, self.root, extractor=extractor)
         source = make_review(self.connection, {1124})["sources"][0]
         self.assertEqual(len(source["records"]), 1)
         self.assertEqual(source["records"][0]["weekly_wage_minor"], 3599900)
         self.assertEqual(source["records"][0]["contract_months"], 24)
         self.assertFalse(source["complete"])
-        self.assertIsNone(self.connection.execute("SELECT weekly_wage_minor FROM player_transfers").fetchone()[0])
+        self.assertIsNone(
+            self.connection.execute(
+                "SELECT weekly_wage_minor FROM player_transfers"
+            ).fetchone()[0]
+        )
 
     def test_export_and_backup_preserve_canonical_data(self):
         self.approved_match()
@@ -463,38 +849,85 @@ class ImportTests(DatabaseTestCase):
         export_data(self.connection, output)
         exported = json.loads(output.read_text())
         self.assertEqual(len(exported["matches"]), 1)
-        self.assertIs(next(competition for competition in exported["competitions"] if competition["name"] == "European International Cup")["is_preseason"], True)
+        self.assertIs(
+            next(
+                competition
+                for competition in exported["competitions"]
+                if competition["name"] == "European International Cup"
+            )["is_preseason"],
+            True,
+        )
         backup = self.root / "backup.sqlite"
         backup_database(self.connection, backup)
         with closing(sqlite3.connect(backup)) as restored:
-            self.assertEqual(restored.execute("SELECT COUNT(*) FROM reviews").fetchone()[0], 1)
-            self.assertEqual(restored.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+            self.assertEqual(
+                restored.execute("SELECT COUNT(*) FROM reviews").fetchone()[0], 1
+            )
+            self.assertEqual(
+                restored.execute("PRAGMA integrity_check").fetchone()[0], "ok"
+            )
         with self.assertRaises(FileExistsError):
             backup_database(self.connection, backup)
 
     def test_start_and_end_snapshots_are_distinct_and_partial_source_stays_queued(self):
         start_source = self.prepare_source(70, "white")
         end_source = self.prepare_source(1055, "black")
-        base = {"type": "player_snapshot", "player": "Aaron Ramsdale", "season": "2018/19", "club": "Notts County",
-                "date_precision": "season", "date_basis": "Boundary squad observation; day not visible"}
+        base = {
+            "type": "player_snapshot",
+            "player": "Aaron Ramsdale",
+            "season": "2018/19",
+            "club": "Notts County",
+            "date_precision": "season",
+            "date_basis": "Boundary squad observation; day not visible",
+        }
         start = {**base, "snapshot_kind": "season_start", "overall": 62}
         end = {**base, "snapshot_kind": "season_end", "overall": 65}
-        approve_review(self.connection, self.review(start_source, [start], complete=False), "Opening squad")
-        approve_review(self.connection, self.review(end_source, [end], complete=False), "Closing squad")
+        approve_review(
+            self.connection,
+            self.review(start_source, [start], complete=False),
+            "Opening squad",
+        )
+        approve_review(
+            self.connection,
+            self.review(end_source, [end], complete=False),
+            "Closing squad",
+        )
         self.assertEqual(status(self.connection)["records"]["players"], 1)
         self.assertEqual(status(self.connection)["records"]["player_snapshots"], 2)
         self.assertEqual(status(self.connection)["source_states"], {"needs_review": 2})
 
-    def test_explicit_correction_can_clear_unknown_values_and_restore_previous_value(self):
+    def test_explicit_correction_can_clear_unknown_values_and_restore_previous_value(
+        self,
+    ):
         source_id, document = self.approved_match()
         cleared = copy.deepcopy(document)
         cleared["sources"][0]["records"][0].update(home_goals=None, away_goals=None)
-        approve_review(self.connection, cleared, "Uncertain second reading should not overwrite known data")
-        self.assertEqual(self.connection.execute("SELECT home_goals FROM matches").fetchone()[0], 1)
-        approve_review(self.connection, cleared, "Withdraw the score after checking evidence", replace_reviewed=True)
-        self.assertIsNone(self.connection.execute("SELECT home_goals FROM matches").fetchone()[0])
-        approve_review(self.connection, document, "Restore the visually confirmed score", replace_reviewed=True)
-        self.assertEqual(self.connection.execute("SELECT home_goals FROM matches").fetchone()[0], 1)
+        approve_review(
+            self.connection,
+            cleared,
+            "Uncertain second reading should not overwrite known data",
+        )
+        self.assertEqual(
+            self.connection.execute("SELECT home_goals FROM matches").fetchone()[0], 1
+        )
+        approve_review(
+            self.connection,
+            cleared,
+            "Withdraw the score after checking evidence",
+            replace_reviewed=True,
+        )
+        self.assertIsNone(
+            self.connection.execute("SELECT home_goals FROM matches").fetchone()[0]
+        )
+        approve_review(
+            self.connection,
+            document,
+            "Restore the visually confirmed score",
+            replace_reviewed=True,
+        )
+        self.assertEqual(
+            self.connection.execute("SELECT home_goals FROM matches").fetchone()[0], 1
+        )
         self.assertEqual(status(self.connection)["records"]["matches"], 1)
 
     def test_export_uses_present_path_after_rename(self):
@@ -509,36 +942,91 @@ class ImportTests(DatabaseTestCase):
 
     def test_non_match_records_are_repeatable_and_totals_keep_their_scope(self):
         source_id = self.prepare_source(1055, "white")
-        totals = {"type": "player_competition_snapshot", "player": "Aaron Ramsdale", "club": "Notts County",
-                  "season": "2018/19", "scope": "all_competitions", "appearances": 53, "clean_sheets": 18}
-        award = {"type": "competition_event", "competition": "EFL League Two", "season": "2018/19",
-                 "player": "Aaron Ramsdale", "club": "Notts County", "event_type": "goalkeeper_of_the_competition",
-                 "announced_on": "2019-05-04", "description": "Visually checked tournament award"}
-        loan = {"type": "player_transfer", "player": "Dominic Calvert-Lewin", "to_club": "Notts County",
-                "transfer_type": "loan", "date_basis": "26/08 shown; year is unconfirmed",
-                "fee_minor": None, "contract_months": 12, "loan_months": 24}
+        totals = {
+            "type": "player_competition_snapshot",
+            "player": "Aaron Ramsdale",
+            "club": "Notts County",
+            "season": "2018/19",
+            "scope": "all_competitions",
+            "appearances": 53,
+            "clean_sheets": 18,
+        }
+        award = {
+            "type": "competition_event",
+            "competition": "EFL League Two",
+            "season": "2018/19",
+            "player": "Aaron Ramsdale",
+            "club": "Notts County",
+            "event_type": "goalkeeper_of_the_competition",
+            "announced_on": "2019-05-04",
+            "description": "Visually checked tournament award",
+        }
+        loan = {
+            "type": "player_transfer",
+            "player": "Dominic Calvert-Lewin",
+            "to_club": "Notts County",
+            "transfer_type": "loan",
+            "date_basis": "26/08 shown; year is unconfirmed",
+            "fee_minor": None,
+            "contract_months": 12,
+            "loan_months": 24,
+        }
         document = self.review(source_id, [totals, award, loan], complete=False)
-        approve_review(self.connection, document, "Synthetic reviewed non-match records")
+        approve_review(
+            self.connection, document, "Synthetic reviewed non-match records"
+        )
         approve_review(self.connection, document, "Repeat")
-        self.assertIsNone(self.connection.execute("SELECT competition_season_id FROM player_competition_snapshots").fetchone()[0])
-        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM player_competition_snapshots").fetchone()[0], 1)
-        self.assertEqual(self.connection.execute("SELECT contract_months, loan_months, fee_minor FROM player_transfers").fetchone()[:], (12, 24, None))
+        self.assertIsNone(
+            self.connection.execute(
+                "SELECT competition_season_id FROM player_competition_snapshots"
+            ).fetchone()[0]
+        )
+        self.assertEqual(
+            self.connection.execute(
+                "SELECT COUNT(*) FROM player_competition_snapshots"
+            ).fetchone()[0],
+            1,
+        )
+        self.assertEqual(
+            self.connection.execute(
+                "SELECT contract_months, loan_months, fee_minor FROM player_transfers"
+            ).fetchone()[:],
+            (12, 24, None),
+        )
 
     def test_core_batch_never_imports_unreviewed_detailed_fields(self):
         match_source, document = self.approved_match()
-        self.connection.execute("UPDATE source_images SET screen_type = 'match_facts' WHERE id = ?", (match_source,))
+        self.connection.execute(
+            "UPDATE source_images SET screen_type = 'match_facts' WHERE id = ?",
+            (match_source,),
+        )
         self.connection.commit()
         player_source = self.prepare_source(76, "black")
 
         class FakePlayerExtractor:
             def extract(self, path):
-                return {"screen_type": "player_performance", "evidence": {}, "issues": [], "records": [{
-                    "type": "player_match", "player": "Takefusa Kubo", "club": "Notts County",
-                    "overall": 63, "rating": 8.4, "goals": 0, "assists": 1,
-                    "passes_completed_short": 999, "clearances": 999,
-                }]}
+                return {
+                    "screen_type": "player_performance",
+                    "evidence": {},
+                    "issues": [],
+                    "records": [
+                        {
+                            "type": "player_match",
+                            "player": "Takefusa Kubo",
+                            "club": "Notts County",
+                            "overall": 63,
+                            "rating": 8.4,
+                            "goals": 0,
+                            "assists": 1,
+                            "passes_completed_short": 999,
+                            "clearances": 999,
+                        }
+                    ],
+                }
 
-        extract_pending(self.connection, self.root, {76}, extractor=FakePlayerExtractor())
+        extract_pending(
+            self.connection, self.root, {76}, extractor=FakePlayerExtractor()
+        )
         decisions = {"player_core_ranges": [[76, 76]]}
         review = prepare_player_cores(self.connection, decisions)
         record = review["sources"][0]["records"][0]
@@ -546,23 +1034,56 @@ class ImportTests(DatabaseTestCase):
         self.assertNotIn("passes_completed_short", record)
         self.assertFalse(review["sources"][0]["complete"])
         approve_review(self.connection, review, "Only image-reviewed core fields")
-        self.assertIsNone(self.connection.execute("SELECT clearances FROM player_matches").fetchone()[0])
-        self.assertEqual(self.connection.execute("SELECT assists FROM player_matches").fetchone()[0], 1)
+        self.assertIsNone(
+            self.connection.execute("SELECT clearances FROM player_matches").fetchone()[
+                0
+            ]
+        )
+        self.assertEqual(
+            self.connection.execute("SELECT assists FROM player_matches").fetchone()[0],
+            1,
+        )
 
-    def test_player_review_restores_detailed_candidates_without_overwriting_core_corrections(self):
+    def test_player_review_restores_detailed_candidates_without_overwriting_core_corrections(
+        self,
+    ):
         match_source, document = self.approved_match()
         player_source = self.prepare_source(76, "black")
         extractor = Mock()
         extractor.extract.return_value = {
-            "screen_type": "player_performance", "evidence": {}, "issues": [], "records": [{
-                "type": "player_match", "player": "Kubo OCR", "club": "Wrong OCR club", "match_id": None,
-                "goals": 9, "assists": 8, "key_passes": 3, "interceptions": 4, "passes_completed_short": 15,
-            }],
+            "screen_type": "player_performance",
+            "evidence": {},
+            "issues": [],
+            "records": [
+                {
+                    "type": "player_match",
+                    "player": "Kubo OCR",
+                    "club": "Wrong OCR club",
+                    "match_id": None,
+                    "goals": 9,
+                    "assists": 8,
+                    "key_passes": 3,
+                    "interceptions": 4,
+                    "passes_completed_short": 15,
+                }
+            ],
         }
         extract_pending(self.connection, self.root, {76}, extractor=extractor)
-        reviewed = {"type": "player_match", "player": "Takefusa Kubo", "club": "Notts County",
-                    "match_id": self.match_id, "goals": 0, "assists": 1, "key_passes": 2, "interceptions": None}
-        approve_review(self.connection, self.review(player_source, [reviewed]), "Corrected core fields")
+        reviewed = {
+            "type": "player_match",
+            "player": "Takefusa Kubo",
+            "club": "Notts County",
+            "match_id": self.match_id,
+            "goals": 0,
+            "assists": 1,
+            "key_passes": 2,
+            "interceptions": None,
+        }
+        approve_review(
+            self.connection,
+            self.review(player_source, [reviewed]),
+            "Corrected core fields",
+        )
 
         source = make_review(self.connection, {76})["sources"][0]
         record = source["records"][0]
@@ -570,138 +1091,272 @@ class ImportTests(DatabaseTestCase):
         self.assertEqual(record["player"], "Takefusa Kubo")
         self.assertEqual(record["club"], "Notts County")
         self.assertEqual(record["match_id"], self.match_id)
-        self.assertEqual((record["goals"], record["assists"], record["key_passes"]), (0, 1, 2))
+        self.assertEqual(
+            (record["goals"], record["assists"], record["key_passes"]), (0, 1, 2)
+        )
         self.assertEqual(record["interceptions"], 4)
         self.assertEqual(record["passes_completed_short"], 15)
         self.assertFalse(source["complete"])
-        self.assertTrue(any("Unreviewed player fields" in issue for issue in source["issues"]))
-        self.assertIsNone(self.connection.execute("SELECT interceptions FROM player_matches").fetchone()[0])
-        approve_review(self.connection, {"schema_version": 3, "sources": [source]}, "Detailed fields checked")
-        saved = self.connection.execute("SELECT goals, assists, key_passes, interceptions, passes_completed_short FROM player_matches").fetchone()
+        self.assertTrue(
+            any("Unreviewed player fields" in issue for issue in source["issues"])
+        )
+        self.assertIsNone(
+            self.connection.execute(
+                "SELECT interceptions FROM player_matches"
+            ).fetchone()[0]
+        )
+        approve_review(
+            self.connection,
+            {"schema_version": 3, "sources": [source]},
+            "Detailed fields checked",
+        )
+        saved = self.connection.execute(
+            "SELECT goals, assists, key_passes, interceptions, passes_completed_short FROM player_matches"
+        ).fetchone()
         self.assertEqual(tuple(saved), (0, 1, 2, 4, 15))
 
-    def test_refreshed_team_fields_fill_blanks_without_replacing_saved_match_values(self):
+    def test_refreshed_team_fields_fill_blanks_without_replacing_saved_match_values(
+        self,
+    ):
         source_id, document = self.approved_match()
         extractor = Mock()
         extractor.extract.return_value = {
-            "screen_type": "match_facts", "evidence": {}, "issues": [], "records": [{
-                **self.match_record(), "home_club": "Incorrect OCR club", "home_goals": 9,
-                "team_stats": {"home": {"shots": 99, "corners": 1}, "away": {"fouls": 8, "corners": 2}},
-            }],
+            "screen_type": "match_facts",
+            "evidence": {},
+            "issues": [],
+            "records": [
+                {
+                    **self.match_record(),
+                    "home_club": "Incorrect OCR club",
+                    "home_goals": 9,
+                    "team_stats": {
+                        "home": {"shots": 99, "corners": 1},
+                        "away": {"fouls": 8, "corners": 2},
+                    },
+                }
+            ],
         }
-        extract_pending(self.connection, self.root, {73}, reextract=True, extractor=extractor)
+        extract_pending(
+            self.connection, self.root, {73}, reextract=True, extractor=extractor
+        )
 
         source = make_review(self.connection, {73})["sources"][0]
 
         self.assertFalse(source["complete"])
         self.assertEqual(source["records"][0]["home_club"], "Notts County")
         self.assertEqual(source["records"][0]["home_goals"], 1)
-        self.assertEqual(source["records"][0]["team_stats"], {"home": {"shots": 6, "corners": 1}, "away": {"fouls": 0, "corners": 2}})
+        self.assertEqual(
+            source["records"][0]["team_stats"],
+            {"home": {"shots": 6, "corners": 1}, "away": {"fouls": 0, "corners": 2}},
+        )
         result = import_pending(self.connection, {73}, {source_id})
         self.assertEqual(result["imported_sources"], 1)
         self.assertEqual(result["skipped_sources"], [])
-        home = self.connection.execute("SELECT shots, corners FROM team_matches WHERE club_id = ?", (self.home_club_id,)).fetchone()
-        away = self.connection.execute("SELECT fouls, corners FROM team_matches WHERE club_id != ?", (self.home_club_id,)).fetchone()
+        home = self.connection.execute(
+            "SELECT shots, corners FROM team_matches WHERE club_id = ?",
+            (self.home_club_id,),
+        ).fetchone()
+        away = self.connection.execute(
+            "SELECT fouls, corners FROM team_matches WHERE club_id != ?",
+            (self.home_club_id,),
+        ).fetchone()
         self.assertEqual(tuple(home), (6, 1))
         self.assertEqual(tuple(away), (0, 2))
-        self.assertEqual(self.connection.execute("SELECT id FROM matches").fetchone()[0], self.match_id)
-        self.assertEqual(import_pending(self.connection, {73}, {source_id})["imported_sources"], 0)
+        self.assertEqual(
+            self.connection.execute("SELECT id FROM matches").fetchone()[0],
+            self.match_id,
+        )
+        self.assertEqual(
+            import_pending(self.connection, {73}, {source_id})["imported_sources"], 0
+        )
 
     def test_fixture_context_rejects_interrupted_player_groups(self):
         source_id, document = self.approved_match()
-        self.connection.execute("UPDATE source_images SET screen_type = 'match_facts' WHERE id = ?", (source_id,))
+        self.connection.execute(
+            "UPDATE source_images SET screen_type = 'match_facts' WHERE id = ?",
+            (source_id,),
+        )
         self.connection.commit()
         interruption = self.prepare_source(74, "gray")
         player_source = self.prepare_source(75, "black")
-        self.connection.execute("UPDATE source_images SET screen_type = 'squad' WHERE id = ?", (interruption,))
-        self.connection.execute("UPDATE source_images SET screen_type = 'player_performance' WHERE id = ?", (player_source,))
+        self.connection.execute(
+            "UPDATE source_images SET screen_type = 'squad' WHERE id = ?",
+            (interruption,),
+        )
+        self.connection.execute(
+            "UPDATE source_images SET screen_type = 'player_performance' WHERE id = ?",
+            (player_source,),
+        )
         self.connection.commit()
         with self.assertRaisesRegex(ValueError, "boundary"):
             fixture_contexts(self.connection)
 
     def test_goalkeeper_shootout_counts_remain_separate(self):
         source_id, document = self.approved_match()
-        self.connection.execute("UPDATE matches SET home_penalties = 2, away_penalties = 4")
-        self.connection.execute("UPDATE source_images SET screen_type = 'match_facts' WHERE id = ?", (source_id,))
+        self.connection.execute(
+            "UPDATE matches SET home_penalties = 2, away_penalties = 4"
+        )
+        self.connection.execute(
+            "UPDATE source_images SET screen_type = 'match_facts' WHERE id = ?",
+            (source_id,),
+        )
         self.connection.commit()
         self.prepare_source(76, "black")
 
         class FakeKeeperExtractor:
             def extract(self, path):
-                return {"screen_type": "goalkeeper_performance", "evidence": {}, "issues": [], "records": [{
-                    "type": "player_match", "player": "Aaron Ramsdale", "club": "Notts County",
-                    "rating": 6.8, "overall": 63, "goals_conceded": 5, "assists": None,
-                }]}
+                return {
+                    "screen_type": "goalkeeper_performance",
+                    "evidence": {},
+                    "issues": [],
+                    "records": [
+                        {
+                            "type": "player_match",
+                            "player": "Aaron Ramsdale",
+                            "club": "Notts County",
+                            "rating": 6.8,
+                            "overall": 63,
+                            "goals_conceded": 5,
+                            "assists": None,
+                        }
+                    ],
+                }
 
-        extract_pending(self.connection, self.root, {76}, extractor=FakeKeeperExtractor())
-        review = prepare_player_cores(self.connection, {"player_core_ranges": [[76, 76]], "goalkeeper_zero_assists": [76]})
-        approve_review(self.connection, review, "Verified match score and goalkeeper count")
-        result = self.connection.execute("SELECT goals_conceded, goals_conceded_displayed FROM player_matches").fetchone()
+        extract_pending(
+            self.connection, self.root, {76}, extractor=FakeKeeperExtractor()
+        )
+        review = prepare_player_cores(
+            self.connection,
+            {"player_core_ranges": [[76, 76]], "goalkeeper_zero_assists": [76]},
+        )
+        approve_review(
+            self.connection, review, "Verified match score and goalkeeper count"
+        )
+        result = self.connection.execute(
+            "SELECT goals_conceded, goals_conceded_displayed FROM player_matches"
+        ).fetchone()
         self.assertEqual(tuple(result), (1, 5))
 
     def test_coverage_assumes_opponent_own_goals_without_modifying_records(self):
         self.approved_match()
         self.connection.execute("UPDATE matches SET home_goals = 3, away_goals = 2")
         player_id = self.create_player("Takefusa Kubo")
-        insert_entity(self.connection, "player_matches", {
-            "match_id": self.match_id, "player_id": player_id, "club_id": self.home_club_id,
-            "displayed_position": "CAM", "goals": 2, "assists": 1, "rating": 8.4, "overall": 63,
-            "shots_on_target": 1, "shots_off_target": 0,
-        })
+        insert_entity(
+            self.connection,
+            "player_matches",
+            {
+                "match_id": self.match_id,
+                "player_id": player_id,
+                "club_id": self.home_club_id,
+                "displayed_position": "CAM",
+                "goals": 2,
+                "assists": 1,
+                "rating": 8.4,
+                "overall": 63,
+                "shots_on_target": 1,
+                "shots_off_target": 0,
+            },
+        )
         self.connection.commit()
         report = coverage_report(self.connection)
         self.assertEqual(report["summary"]["matches"], 1)
         self.assertEqual(report["summary"]["preseason_matches"], 1)
         self.assertEqual(report["summary"]["player_records"], 1)
         self.assertEqual(report["summary"]["matches_with_two_complete_team_rows"], 0)
-        self.assertEqual(report["player_field_availability"]["minutes_played"], {"recorded": 0, "null": 1})
-        self.assertNotIn("player_goal_difference", [warning["code"] for warning in report["warnings"]])
+        self.assertEqual(
+            report["player_field_availability"]["minutes_played"],
+            {"recorded": 0, "null": 1},
+        )
+        self.assertNotIn(
+            "player_goal_difference",
+            [warning["code"] for warning in report["warnings"]],
+        )
         self.assertEqual(report["matches"][0]["goal_difference"], 1)
         self.assertEqual(report["matches"][0]["assumed_own_goals"], 1)
         self.assertEqual(report["summary"]["assumed_own_goals"], 1)
-        self.assertEqual(self.connection.execute("SELECT home_goals FROM matches").fetchone()[0], 3)
-        self.assertEqual(self.connection.execute("SELECT goals FROM player_matches").fetchone()[0], 2)
+        self.assertEqual(
+            self.connection.execute("SELECT home_goals FROM matches").fetchone()[0], 3
+        )
+        self.assertEqual(
+            self.connection.execute("SELECT goals FROM player_matches").fetchone()[0], 2
+        )
 
     def test_coverage_warns_when_player_goals_exceed_team_score(self):
         self.approved_match()
         player_id = self.create_player("Takefusa Kubo")
-        insert_entity(self.connection, "player_matches", {
-            "match_id": self.match_id, "player_id": player_id, "club_id": self.home_club_id,
-            "displayed_position": "CAM", "goals": 2,
-        })
+        insert_entity(
+            self.connection,
+            "player_matches",
+            {
+                "match_id": self.match_id,
+                "player_id": player_id,
+                "club_id": self.home_club_id,
+                "displayed_position": "CAM",
+                "goals": 2,
+            },
+        )
         self.connection.commit()
 
         report = coverage_report(self.connection)
 
-        discrepancy = next(warning for warning in report["warnings"] if warning["code"] == "player_goal_difference")
+        discrepancy = next(
+            warning
+            for warning in report["warnings"]
+            if warning["code"] == "player_goal_difference"
+        )
         self.assertEqual(discrepancy["difference"], -1)
         self.assertEqual(report["matches"][0]["assumed_own_goals"], 0)
-        self.assertEqual(self.connection.execute("SELECT home_goals FROM matches").fetchone()[0], 1)
-        self.assertEqual(self.connection.execute("SELECT goals FROM player_matches").fetchone()[0], 2)
+        self.assertEqual(
+            self.connection.execute("SELECT home_goals FROM matches").fetchone()[0], 1
+        )
+        self.assertEqual(
+            self.connection.execute("SELECT goals FROM player_matches").fetchone()[0], 2
+        )
 
     def test_coverage_does_not_assume_own_goals_with_unknown_player_goals(self):
         self.approved_match()
         player_id = self.create_player("Takefusa Kubo")
-        insert_entity(self.connection, "player_matches", {
-            "match_id": self.match_id, "player_id": player_id, "club_id": self.home_club_id,
-            "displayed_position": "CAM", "goals": None,
-        })
+        insert_entity(
+            self.connection,
+            "player_matches",
+            {
+                "match_id": self.match_id,
+                "player_id": player_id,
+                "club_id": self.home_club_id,
+                "displayed_position": "CAM",
+                "goals": None,
+            },
+        )
         self.connection.commit()
 
         report = coverage_report(self.connection)
 
         self.assertIsNone(report["matches"][0]["credited_player_goals"])
         self.assertIsNone(report["matches"][0]["assumed_own_goals"])
-        self.assertIn("missing_player_core_fields", [warning["code"] for warning in report["warnings"]])
+        self.assertIn(
+            "missing_player_core_fields",
+            [warning["code"] for warning in report["warnings"]],
+        )
 
     def test_coverage_warnings_identify_fixtures_and_missing_statistics(self):
         self.approved_match()
         player_id = self.create_player("Aaron Ramsdale")
-        insert_entity(self.connection, "player_matches", {
-            "match_id": self.match_id, "player_id": player_id, "club_id": self.home_club_id,
-            "displayed_position": "GK", "goals_conceded": 1, "shots_caught": 2, "shots_parried": 0,
-            "rating": 6.5, "overall": 65, "assists": None,
-        })
+        insert_entity(
+            self.connection,
+            "player_matches",
+            {
+                "match_id": self.match_id,
+                "player_id": player_id,
+                "club_id": self.home_club_id,
+                "displayed_position": "GK",
+                "goals_conceded": 1,
+                "shots_caught": 2,
+                "shots_parried": 0,
+                "rating": 6.5,
+                "overall": 65,
+                "assists": None,
+            },
+        )
         self.connection.execute(
             "UPDATE team_matches SET shots = 3, shots_on_target = 2, possession_pct = 50, tackles = 1, "
             "fouls = 0, corners = NULL, shot_accuracy_pct = 67, pass_accuracy_pct = 80 WHERE match_id = ?",
@@ -712,10 +1367,17 @@ class ImportTests(DatabaseTestCase):
         report = coverage_report(self.connection)
 
         warnings = {warning["code"]: warning for warning in report["warnings"]}
-        self.assertEqual(warnings["missing_player_core_fields"]["fields"], {"assists": 1})
-        self.assertEqual(warnings["missing_player_core_fields"]["detail"], "Missing player stats: Aaron Ramsdale (assists).")
-        self.assertEqual(warnings["incomplete_team_statistics"]["detail"],
-                         "Missing team stats: Notts County (corners); Dundee FC (corners).")
+        self.assertEqual(
+            warnings["missing_player_core_fields"]["fields"], {"assists": 1}
+        )
+        self.assertEqual(
+            warnings["missing_player_core_fields"]["detail"],
+            "Missing player stats: Aaron Ramsdale (assists).",
+        )
+        self.assertEqual(
+            warnings["incomplete_team_statistics"]["detail"],
+            "Missing team stats: Notts County (corners); Dundee FC (corners).",
+        )
         for warning in report["warnings"]:
             self.assertEqual(warning["played_on"], "2018-07-04")
             self.assertEqual(warning["home_club"], "Notts County")
@@ -726,42 +1388,65 @@ class ImportTests(DatabaseTestCase):
 
     def test_coverage_does_not_treat_unknown_scores_as_draws(self):
         source_id, document = self.approved_match()
-        self.connection.execute("UPDATE matches SET home_goals = NULL, away_goals = NULL")
+        self.connection.execute(
+            "UPDATE matches SET home_goals = NULL, away_goals = NULL"
+        )
         self.connection.commit()
         report = coverage_report(self.connection)
         self.assertEqual(report["competitions"][0]["known_results"], 0)
         self.assertEqual(report["competitions"][0]["draws"], 0)
         self.assertIsNone(report["matches"][0]["goal_difference"])
         self.assertIsNone(report["matches"][0]["assumed_own_goals"])
-        self.assertIn("missing_match_score", [warning["code"] for warning in report["warnings"]])
+        self.assertIn(
+            "missing_match_score", [warning["code"] for warning in report["warnings"]]
+        )
 
 
 class AutomaticImportTests(DatabaseTestCase):
     def setUp(self):
         super().setUp()
         self.match = {
-            "type": "match", "season": "2018/19", "competition": "European International Cup",
-            "played_on": "2018-07-04", "home_club": "Notts County", "away_club": "Dundee FC",
-            "home_goals": 1, "away_goals": 1,
+            "type": "match",
+            "season": "2018/19",
+            "competition": "European International Cup",
+            "played_on": "2018-07-04",
+            "home_club": "Notts County",
+            "away_club": "Dundee FC",
+            "home_goals": 1,
+            "away_goals": 1,
         }
         self.player = {
-            "type": "player_match", "player": "Harry Kewell", "club": "Notts County",
-            "match_id": None, "rating": 7.5, "goals": 1, "assists": 0,
+            "type": "player_match",
+            "player": "Harry Kewell",
+            "club": "Notts County",
+            "match_id": None,
+            "rating": 7.5,
+            "goals": 1,
+            "assists": 0,
         }
 
     def extract(self, *screens):
         for index in range(len(screens)):
-            self.create_image(f"Screenshot ({73 + index}).png", color=(index * 20, 0, 0))
+            self.create_image(
+                f"Screenshot ({73 + index}).png", color=(index * 20, 0, 0)
+            )
         inventory(self.connection, self.root)
         extractor = Mock()
         extractor.extract.side_effect = [
-            {"screen_type": screen_type, "records": records, "evidence": {}, "issues": []}
+            {
+                "screen_type": screen_type,
+                "records": records,
+                "evidence": {},
+                "issues": [],
+            }
             for screen_type, records in screens
         ]
         extract_pending(self.connection, self.root, extractor=extractor)
 
     def test_cached_candidates_import_and_link_once(self):
-        self.extract(("match_facts", [self.match]), ("player_performance", [self.player]))
+        self.extract(
+            ("match_facts", [self.match]), ("player_performance", [self.player])
+        )
 
         result = import_pending(self.connection)
 
@@ -769,70 +1454,115 @@ class AutomaticImportTests(DatabaseTestCase):
         self.assertEqual(result["imported_records"], 2)
         self.assertEqual(result["skipped_sources"], [])
         match_id = self.connection.execute("SELECT id FROM matches").fetchone()[0]
-        self.assertEqual(self.connection.execute("SELECT match_id FROM player_matches").fetchone()[0], match_id)
+        self.assertEqual(
+            self.connection.execute("SELECT match_id FROM player_matches").fetchone()[
+                0
+            ],
+            match_id,
+        )
         self.assertEqual(status(self.connection)["source_states"], {"imported": 2})
         self.assertEqual(import_pending(self.connection)["imported_sources"], 0)
-        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM reviews").fetchone()[0], 2)
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM reviews").fetchone()[0], 2
+        )
         self.assertEqual(validate_database(self.connection), [])
 
     def test_interrupted_context_does_not_block_later_match(self):
-        self.extract(("match_facts", [self.match]), ("dashboard", []), ("player_performance", [self.player]),
-                     ("match_facts", [{**self.match, "played_on": "2018-07-05"}]), ("player_performance", [self.player]))
+        self.extract(
+            ("match_facts", [self.match]),
+            ("dashboard", []),
+            ("player_performance", [self.player]),
+            ("match_facts", [{**self.match, "played_on": "2018-07-05"}]),
+            ("player_performance", [self.player]),
+        )
 
         result = import_pending(self.connection)
 
         self.assertEqual(result["imported_sources"], 3)
         self.assertEqual(len(result["skipped_sources"]), 2)
-        self.assertIn("No unambiguous preceding match", result["skipped_sources"][1]["reason"])
+        self.assertIn(
+            "No unambiguous preceding match", result["skipped_sources"][1]["reason"]
+        )
         appearance = self.connection.execute(
             "SELECT played_on FROM matches JOIN player_matches ON player_matches.match_id = matches.id",
         ).fetchall()
         self.assertEqual([row[0] for row in appearance], ["2018-07-05"])
 
     def test_invalid_match_cannot_reuse_previous_fixture(self):
-        self.extract(("match_facts", [self.match]), ("match_facts", [{**self.match, "played_on": None}]),
-                     ("player_performance", [self.player]))
+        self.extract(
+            ("match_facts", [self.match]),
+            ("match_facts", [{**self.match, "played_on": None}]),
+            ("player_performance", [self.player]),
+        )
 
         result = import_pending(self.connection)
 
         self.assertEqual(result["imported_sources"], 1)
         self.assertEqual(len(result["skipped_sources"]), 2)
-        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM player_matches").fetchone()[0], 0)
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM player_matches").fetchone()[
+                0
+            ],
+            0,
+        )
         self.assertEqual(validate_database(self.connection), [])
 
     def test_selection_uses_existing_header_outside_selection(self):
-        self.extract(("match_facts", [self.match]), ("player_performance", [self.player]))
+        self.extract(
+            ("match_facts", [self.match]), ("player_performance", [self.player])
+        )
         self.assertEqual(import_pending(self.connection, {73})["imported_sources"], 1)
 
         result = import_pending(self.connection, {74})
 
         self.assertEqual(result["imported_sources"], 1)
         self.assertEqual(result["skipped_sources"], [])
-        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM player_matches").fetchone()[0], 1)
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM player_matches").fetchone()[
+                0
+            ],
+            1,
+        )
 
     def test_refresh_preserves_saved_values(self):
-        self.extract(("match_facts", [self.match]), ("player_performance", [self.player]))
+        self.extract(
+            ("match_facts", [self.match]), ("player_performance", [self.player])
+        )
         import_pending(self.connection)
-        source_id = self.connection.execute("SELECT source_id FROM source_paths WHERE sequence = 74").fetchone()[0]
+        source_id = self.connection.execute(
+            "SELECT source_id FROM source_paths WHERE sequence = 74"
+        ).fetchone()[0]
         with self.connection:
-            self.connection.execute("UPDATE extractions SET candidate_json = ? WHERE source_id = ?",
-                                    (json.dumps([{**self.player, "goals": 5}]), source_id))
+            self.connection.execute(
+                "UPDATE extractions SET candidate_json = ? WHERE source_id = ?",
+                (json.dumps([{**self.player, "goals": 5}]), source_id),
+            )
 
         result = import_pending(self.connection, refreshed_source_ids={source_id})
 
         self.assertEqual(result["imported_sources"], 0)
         self.assertEqual(result["unchanged_sources"], 1)
-        self.assertEqual(self.connection.execute("SELECT goals FROM player_matches").fetchone()[0], 1)
-        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM reviews").fetchone()[0], 2)
+        self.assertEqual(
+            self.connection.execute("SELECT goals FROM player_matches").fetchone()[0], 1
+        )
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM reviews").fetchone()[0], 2
+        )
 
     def test_import_reuses_historical_player_and_club_corrections(self):
         raw_match = {**self.match, "home_club": "Notts Countv"}
         raw_player = {**self.player, "player": "Harry KewelI", "club": "Notts Countv"}
-        self.extract(("match_facts", [raw_match]), ("player_performance", [raw_player]),
-                     ("match_facts", [{**raw_match, "played_on": "2018-07-05"}]), ("player_performance", [raw_player]))
+        self.extract(
+            ("match_facts", [raw_match]),
+            ("player_performance", [raw_player]),
+            ("match_facts", [{**raw_match, "played_on": "2018-07-05"}]),
+            ("player_performance", [raw_player]),
+        )
         reviewed = make_review(self.connection, {73, 74})
         reviewed["sources"][0]["records"] = [self.match]
-        reviewed["sources"][1]["records"] = [{**self.player, "match_source_id": reviewed["sources"][0]["source_id"]}]
+        reviewed["sources"][1]["records"] = [
+            {**self.player, "match_source_id": reviewed["sources"][0]["source_id"]}
+        ]
         for source in reviewed["sources"]:
             source["complete"] = True
         approve_review(self.connection, reviewed, "Historical name corrections")
@@ -841,40 +1571,80 @@ class AutomaticImportTests(DatabaseTestCase):
 
         self.assertEqual(result["imported_sources"], 2)
         self.assertEqual(result["skipped_sources"], [])
-        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM players").fetchone()[0], 1)
-        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM clubs").fetchone()[0], 2)
-        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM matches").fetchone()[0], 2)
-        self.assertEqual(self.connection.execute("SELECT name FROM players").fetchone()[0], "Harry Kewell")
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM players").fetchone()[0], 1
+        )
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM clubs").fetchone()[0], 2
+        )
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM matches").fetchone()[0], 2
+        )
+        self.assertEqual(
+            self.connection.execute("SELECT name FROM players").fetchone()[0],
+            "Harry Kewell",
+        )
 
     def test_outdated_missing_goalkeeper_counts_refresh_once(self):
-        keeper = {**self.player, "player": "Aaron Ramsdale", "displayed_position": "GK", "assists": None, "goals_conceded": 1}
-        self.extract(("match_facts", [self.match]), ("goalkeeper_performance", [keeper]))
+        keeper = {
+            **self.player,
+            "player": "Aaron Ramsdale",
+            "displayed_position": "GK",
+            "assists": None,
+            "goals_conceded": 1,
+        }
+        self.extract(
+            ("match_facts", [self.match]), ("goalkeeper_performance", [keeper])
+        )
         import_pending(self.connection)
-        source_id = self.connection.execute("SELECT source_id FROM source_paths WHERE sequence = 74").fetchone()[0]
+        source_id = self.connection.execute(
+            "SELECT source_id FROM source_paths WHERE sequence = 74"
+        ).fetchone()[0]
         with self.connection:
-            self.connection.execute("UPDATE extractions SET extractor_version = '1.2.0', evidence_json = ? WHERE source_id = ?",
-                                    (json.dumps({"fields": {"assists": {"raw_text": "."}}}), source_id))
+            self.connection.execute(
+                "UPDATE extractions SET extractor_version = '1.2.0', evidence_json = ? WHERE source_id = ?",
+                (json.dumps({"fields": {"assists": {"raw_text": "."}}}), source_id),
+            )
         extractor = Mock()
         extractor.extract.return_value = {
-            "screen_type": "goalkeeper_performance", "records": [{**keeper, "assists": 0}], "evidence": {}, "issues": [],
+            "screen_type": "goalkeeper_performance",
+            "records": [{**keeper, "assists": 0}],
+            "evidence": {},
+            "issues": [],
         }
 
         result = extract_pending(self.connection, self.root, extractor=extractor)
 
         self.assertEqual(result["processed_source_ids"], [source_id])
-        self.assertIsNone(self.connection.execute("SELECT assists FROM player_matches").fetchone()[0])
-        import_pending(self.connection, refreshed_source_ids=result["processed_source_ids"])
-        self.assertEqual(self.connection.execute("SELECT assists FROM player_matches").fetchone()[0], 0)
-        self.assertEqual(extract_pending(self.connection, self.root, extractor=extractor)["extracted"], 0)
+        self.assertIsNone(
+            self.connection.execute("SELECT assists FROM player_matches").fetchone()[0]
+        )
+        import_pending(
+            self.connection, refreshed_source_ids=result["processed_source_ids"]
+        )
+        self.assertEqual(
+            self.connection.execute("SELECT assists FROM player_matches").fetchone()[0],
+            0,
+        )
+        self.assertEqual(
+            extract_pending(self.connection, self.root, extractor=extractor)[
+                "extracted"
+            ],
+            0,
+        )
         extractor.extract.assert_called_once()
 
     def test_outdated_ocr_does_not_refresh_corrected_numeric_values(self):
-        self.extract(("match_facts", [self.match]), ("player_performance", [self.player]))
+        self.extract(
+            ("match_facts", [self.match]), ("player_performance", [self.player])
+        )
         import_pending(self.connection)
         with self.connection:
-            self.connection.execute("UPDATE extractions SET extractor_version = '1.2.0', evidence_json = ? WHERE source_id IN "
-                                    "(SELECT source_id FROM source_paths WHERE sequence = 74)",
-                                    (json.dumps({"fields": {"assists": {"raw_text": "."}}}),))
+            self.connection.execute(
+                "UPDATE extractions SET extractor_version = '1.2.0', evidence_json = ? WHERE source_id IN "
+                "(SELECT source_id FROM source_paths WHERE sequence = 74)",
+                (json.dumps({"fields": {"assists": {"raw_text": "."}}}),),
+            )
         extractor = Mock()
 
         result = extract_pending(self.connection, self.root, extractor=extractor)
@@ -884,9 +1654,17 @@ class AutomaticImportTests(DatabaseTestCase):
         extractor.extract.assert_not_called()
 
     def test_goalkeeper_shootout_count_is_normalized_automatically(self):
-        keeper = {**self.player, "player": "Aaron Ramsdale", "displayed_position": "GK", "goals": None, "goals_conceded": 4}
-        self.extract(("match_facts", [{**self.match, "home_penalties": 5, "away_penalties": 3}]),
-                     ("goalkeeper_performance", [keeper]))
+        keeper = {
+            **self.player,
+            "player": "Aaron Ramsdale",
+            "displayed_position": "GK",
+            "goals": None,
+            "goals_conceded": 4,
+        }
+        self.extract(
+            ("match_facts", [{**self.match, "home_penalties": 5, "away_penalties": 3}]),
+            ("goalkeeper_performance", [keeper]),
+        )
 
         result = import_pending(self.connection)
 
@@ -898,44 +1676,73 @@ class AutomaticImportTests(DatabaseTestCase):
 
     def test_ambiguous_goalkeeper_count_is_skipped(self):
         keeper = {**self.player, "displayed_position": "GK", "goals_conceded": 7}
-        self.extract(("match_facts", [{**self.match, "home_penalties": 5, "away_penalties": 3}]),
-                     ("goalkeeper_performance", [keeper]))
+        self.extract(
+            ("match_facts", [{**self.match, "home_penalties": 5, "away_penalties": 3}]),
+            ("goalkeeper_performance", [keeper]),
+        )
 
         result = import_pending(self.connection)
 
         self.assertEqual(result["imported_sources"], 1)
         self.assertEqual(len(result["skipped_sources"]), 1)
         self.assertIn("Ambiguous shootout", result["skipped_sources"][0]["reason"])
-        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM player_matches").fetchone()[0], 0)
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM player_matches").fetchone()[
+                0
+            ],
+            0,
+        )
 
 
 class CommandTests(DatabaseTestCase):
     def setUp(self):
         super().setUp()
+        self.connection.close()
+        self.database_path = self.root / "processing" / "data" / "career.sqlite"
+        self.connection = connect(self.database_path)
+        self.addCleanup(self.connection.close)
         self.record = {
-            "type": "match", "season": "2018/19", "competition": "European International Cup",
-            "played_on": "2018-07-04", "home_club": "Notts County", "away_club": "Dundee FC",
-            "home_goals": 1, "away_goals": 1,
+            "type": "match",
+            "season": "2018/19",
+            "competition": "European International Cup",
+            "played_on": "2018-07-04",
+            "home_club": "Notts County",
+            "away_club": "Dundee FC",
+            "home_goals": 1,
+            "away_goals": 1,
         }
         self.extractor = Mock()
         self.extractor.extract.return_value = {
-            "screen_type": "match_facts", "records": [self.record], "evidence": {}, "issues": [],
+            "screen_type": "match_facts",
+            "records": [self.record],
+            "evidence": {},
+            "issues": [],
         }
-        replacement = patch("processing.extraction.ScreenshotExtractor", return_value=self.extractor)
+        replacement = patch(
+            "processing.extraction.ScreenshotExtractor", return_value=self.extractor
+        )
         replacement.start()
         self.addCleanup(replacement.stop)
 
-    def command(self, *arguments):
+    def command(self, *arguments, expected_exit=0):
         from processing.__main__ import main
 
         output = io.StringIO()
-        with redirect_stdout(output):
-            result = main(["--root", str(self.root), "--db", str(self.root / "career.sqlite"), *map(str, arguments)])
-        self.assertEqual(result, 0)
+        rebuilding = arguments[0] == "process"
+        if rebuilding:
+            self.connection.close()
+        try:
+            with redirect_stdout(output):
+                result = main(["--root", str(self.root), *map(str, arguments)])
+            self.assertEqual(result, expected_exit, output.getvalue())
+        finally:
+            if rebuilding:
+                self.connection = connect(self.database_path)
+                self.addCleanup(self.connection.close)
         text = output.getvalue()
-        return json.loads(text[text.index("{"):])
+        return json.loads(text[text.index("{") :])
 
-    def launcher(self, *arguments, report_environment=False):
+    def launcher(self, *arguments, report_environment=False, python_exit=0):
         repository = Path(__file__).resolve().parents[2]
         bin_dir = self.root / "fake commands"
         bin_dir.mkdir(exist_ok=True)
@@ -944,49 +1751,190 @@ class CommandTests(DatabaseTestCase):
             script = '#!/bin/sh\nprintf "%s\\n" "$PWD" "$@"\n'
             if report_environment:
                 script += 'printf "CAREER_DB=%s\\nCAREER_DATA_LABEL=%s\\n" "${CAREER_DB-}" "${CAREER_DATA_LABEL-}"\n'
+            if name == "python3":
+                script += f"exit {python_exit}\n"
             executable.write_text(script, encoding="utf-8")
             executable.chmod(0o755)
-        environment = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
+        environment = {
+            **os.environ,
+            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+        }
         return subprocess.run(
-            [str(repository / "run"), *arguments], cwd=self.root, env=environment,
-            capture_output=True, text=True, timeout=5,
+            [str(repository / "run"), *arguments],
+            cwd=self.root,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
 
     def test_launcher_start_uses_port_5000_from_any_directory(self):
         repository = Path(__file__).resolve().parents[2]
         result = self.launcher("start", "--clearScreen", "false")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.splitlines(), [
-            str(repository), "--prefix", str(repository / "frontend"), "run", "dev", "--",
-            "--port", "5000", "--strictPort", "--clearScreen", "false",
-        ])
+        self.assertEqual(
+            result.stdout.splitlines(),
+            [
+                str(repository),
+                "--prefix",
+                str(repository / "frontend"),
+                "run",
+                "dev",
+                "--",
+                "--port",
+                "5000",
+                "--strictPort",
+                "--clearScreen",
+                "false",
+            ],
+        )
 
     def test_launcher_start_never_inherits_a_preview_database(self):
-        with patch.dict(os.environ, {"CAREER_DB": "/temporary/preview.sqlite", "CAREER_DATA_LABEL": "Old preview"}):
+        with patch.dict(
+            os.environ,
+            {
+                "CAREER_DB": "/temporary/preview.sqlite",
+                "CAREER_DATA_LABEL": "Old preview",
+            },
+        ):
             result = self.launcher("start", report_environment=True)
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.splitlines()[-2:], ["CAREER_DB=", "CAREER_DATA_LABEL="])
+        self.assertEqual(
+            result.stdout.splitlines()[-2:], ["CAREER_DB=", "CAREER_DATA_LABEL="]
+        )
 
-    def test_launcher_process_forwards_arguments_from_repository_root(self):
+    def test_process_recreates_default_data_directory_without_flags(self):
+        image = self.create_image()
+        image_bytes = image.read_bytes()
+        data = self.root / "processing" / "data"
+        for name in (
+            "backups/old.sqlite",
+            "reviews/old.json",
+            "previews/old.sqlite",
+            "cache.bin",
+        ):
+            stale = data / name
+            stale.parent.mkdir(parents=True, exist_ok=True)
+            stale.write_bytes(b"stale processing data")
+        outside = self.root / "keep.txt"
+        outside.write_text("not processing data", encoding="utf-8")
+        extraction = self.extractor.extract.return_value
+
+        def extract_after_reset(path):
+            self.assertFalse((data / "backups").exists())
+            self.assertFalse((data / "reviews").exists())
+            self.assertFalse((data / "previews").exists())
+            self.assertFalse((data / "cache.bin").exists())
+            return extraction
+
+        self.extractor.extract.side_effect = extract_after_reset
+        identities = []
+        for _attempt in range(2):
+            result = self.command("process")
+            self.assertEqual(result["extraction"]["extracted"], 1)
+            self.assertEqual(result["extraction"]["skipped"], 0)
+            self.assertNotIn("backup", result)
+            with closing(connect(data / "career.sqlite")) as rebuilt:
+                identities.append(
+                    rebuilt.execute("SELECT id FROM matches").fetchone()[0]
+                )
+                self.assertEqual(
+                    rebuilt.execute("SELECT COUNT(*) FROM reviews").fetchone()[0], 1
+                )
+                self.assertEqual(validate_database(rebuilt), [])
+        self.assertNotEqual(*identities)
+        self.assertEqual(image.read_bytes(), image_bytes)
+        self.assertEqual(outside.read_text(encoding="utf-8"), "not processing data")
+
+    def test_launcher_process_runs_without_arguments_from_repository_root(self):
         repository = Path(__file__).resolve().parents[2]
-        for arguments in (("--limit", "2", "--screenshots", "73,74"), ("--clean",)):
+        result = self.launcher("process")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout.splitlines(), [str(repository), "-m", "processing", "process"]
+        )
+
+    def test_launcher_process_rejects_every_extra_argument(self):
+        for arguments in (
+            ("--limit", "2"),
+            ("--screenshots", "73,74"),
+            ("--clean",),
+            ("--reextract",),
+            ("--help",),
+            ("anything",),
+        ):
             with self.subTest(arguments=arguments):
                 result = self.launcher("process", *arguments)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(result.stdout.splitlines(), [
-                    str(repository), "-m", "processing", "process", *arguments,
-                ])
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("accepts no arguments", result.stderr)
+                self.assertEqual(result.stdout, "")
 
-    def test_launcher_only_exposes_start_and_process(self):
+    def test_launcher_format_runs_both_formatters_from_repository_root(self):
+        repository = Path(__file__).resolve().parents[2]
+
+        result = self.launcher("format")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout.splitlines(),
+            [
+                str(repository),
+                "--prefix",
+                str(repository / "frontend"),
+                "run",
+                "format",
+                str(repository),
+                "-m",
+                "ruff",
+                "format",
+                "--extend-exclude",
+                "processing/data",
+                "processing",
+            ],
+        )
+
+    def test_launcher_format_rejects_extra_arguments(self):
+        result = self.launcher("format", "--check")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("accepts no arguments", result.stderr)
+        self.assertEqual(result.stdout, "")
+
+    def test_launcher_format_checks_ruff_before_running_prettier(self):
+        result = self.launcher("format", python_exit=1)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Ruff is missing", result.stderr)
+        self.assertEqual(result.stdout, "")
+
+    def test_launcher_only_exposes_start_process_and_format(self):
         for arguments in ((), ("-h",), ("--help",), ("help",)):
             with self.subTest(arguments=arguments):
                 result = self.launcher(*arguments)
                 self.assertEqual(result.returncode, 0, result.stderr)
-                commands = [line.split()[0] for line in result.stdout.splitlines() if line.startswith("  ")]
-                self.assertEqual(commands, ["start", "process"])
-        for command in ("dev", "build", "preview", "approve", "review", "status", "backup", "test",
-                        "e2e", "lint", "check", "format", "inventory", "validate", "report", "reconcile", "export"):
+                commands = [
+                    line.split()[0]
+                    for line in result.stdout.splitlines()
+                    if line.startswith("  ")
+                ]
+                self.assertEqual(commands, ["start", "process", "format"])
+        for command in (
+            "dev",
+            "build",
+            "preview",
+            "approve",
+            "review",
+            "status",
+            "backup",
+            "test",
+            "e2e",
+            "lint",
+            "check",
+            "inventory",
+            "validate",
+            "report",
+            "reconcile",
+            "export",
+        ):
             with self.subTest(command=command):
                 result = self.launcher(command)
                 self.assertEqual(result.returncode, 2)
@@ -1000,118 +1948,169 @@ class CommandTests(DatabaseTestCase):
         self.assertIn("dashboard updates automatically", processed["message"])
         self.assertNotIn("next", processed)
         self.assertNotIn("review_file", processed)
-        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM matches").fetchone()[0], 1)
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM matches").fetchone()[0], 1
+        )
         self.assertEqual(len(self.command("data")["matches"]), 1)
         repeat = self.command("process")
-        self.assertEqual(repeat["extraction"]["extracted"], 0)
-        self.assertEqual(repeat["import"]["imported_sources"], 0)
+        self.assertEqual(repeat["extraction"]["extracted"], 1)
+        self.assertEqual(repeat["import"]["imported_sources"], 1)
         self.assertNotIn("review_file", repeat)
-        self.extractor.extract.assert_called_once()
+        self.assertEqual(self.extractor.extract.call_count, 2)
         self.assertNotIn("source_images", self.command("data"))
 
     def test_processing_timestamp_records_runs_not_dashboard_loads(self):
         self.create_image()
         first = self.command("process")["processing_run"]
         self.assertTrue(is_uuid(first["id"]))
-        self.assertEqual(first["mode"], "incremental")
+        self.assertEqual(first["mode"], "clean")
         self.assertEqual(first["status"], "completed")
         self.assertEqual(first["extracted_images"], 1)
         self.assertTrue(first["completed_at"].endswith("+00:00"))
         self.assertEqual(self.command("data")["processing"]["last_run"], first)
         self.assertEqual(self.command("data")["processing"]["last_run"], first)
-        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM processing_runs").fetchone()[0], 1)
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM processing_runs").fetchone()[
+                0
+            ],
+            1,
+        )
 
         repeated = self.command("process")["processing_run"]
 
         self.assertNotEqual(repeated["id"], first["id"])
-        self.assertEqual(repeated["extracted_images"], 0)
+        self.assertEqual(repeated["extracted_images"], 1)
         self.assertGreaterEqual(repeated["completed_at"], first["completed_at"])
         self.assertEqual(self.command("data")["processing"]["last_run"], repeated)
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM processing_runs").fetchone()[
+                0
+            ],
+            1,
+        )
 
     def test_legacy_database_exposes_last_ocr_without_inventing_a_run(self):
-        self.assertEqual(self.command("data")["processing"], {"last_run": None, "last_extracted_at": None})
+        self.assertEqual(
+            self.command("data")["processing"],
+            {"last_run": None, "last_extracted_at": None},
+        )
         self.create_image()
         self.command("process")
         with self.connection:
             self.connection.execute("DROP TABLE processing_runs")
-            self.connection.execute("UPDATE extractions SET extracted_at = '2026-09-13 06:27:18'")
+            self.connection.execute(
+                "UPDATE extractions SET extracted_at = '2026-09-13 06:27:18'"
+            )
 
         metadata = self.command("data")["processing"]
 
         self.assertIsNone(metadata["last_run"])
         self.assertEqual(metadata["last_extracted_at"], "2026-09-13T06:27:18+00:00")
-        self.assertIsNone(self.connection.execute("SELECT 1 FROM sqlite_master WHERE name = 'processing_runs'").fetchone())
+        self.assertIsNone(
+            self.connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE name = 'processing_runs'"
+            ).fetchone()
+        )
 
     def test_processing_metadata_reports_skipped_imports(self):
         self.create_image()
         self.extractor.extract.return_value = {
-            "screen_type": "squad", "records": [{"type": "player_snapshot", "player": "Test Player", "season": None}],
-            "evidence": {}, "issues": [],
+            "screen_type": "squad",
+            "records": [
+                {"type": "player_snapshot", "player": "Test Player", "season": None}
+            ],
+            "evidence": {},
+            "issues": [],
         }
 
-        result = self.command("process")
+        result = self.command("process", expected_exit=1)
 
         self.assertEqual(result["processing_run"]["status"], "partial")
         self.assertEqual(result["processing_run"]["skipped_sources"], 1)
-        self.assertEqual(self.command("data")["processing"]["last_run"], result["processing_run"])
+        self.assertEqual(
+            self.command("data")["processing"]["last_run"], result["processing_run"]
+        )
 
-    def test_clean_processing_metadata_is_published_only_on_success(self):
-        from processing.__main__ import main
-
+    def test_failed_rebuild_records_its_own_processing_metadata(self):
         self.create_image()
         first = self.command("process")["processing_run"]
         self.extractor.extract.side_effect = ValueError("OCR failed")
-        with redirect_stdout(io.StringIO()):
-            result = main(["--root", str(self.root), "--db", str(self.root / "career.sqlite"), "process", "--clean"])
-        self.assertEqual(result, 1)
-        self.assertEqual(self.command("data")["processing"]["last_run"], first)
+
+        failed = self.command("process", expected_exit=1)["processing_run"]
+
+        self.assertNotEqual(failed["id"], first["id"])
+        self.assertEqual(failed["status"], "partial")
+        self.assertEqual(failed["extraction_errors"], 1)
+        self.assertEqual(self.command("data")["processing"]["last_run"], failed)
         self.extractor.extract.side_effect = None
 
-        rebuilt = self.command("process", "--clean")["processing_run"]
+        rebuilt = self.command("process")["processing_run"]
 
         self.assertEqual(rebuilt["mode"], "clean")
         self.assertNotEqual(rebuilt["id"], first["id"])
         self.assertEqual(self.command("data")["processing"]["last_run"], rebuilt)
 
-    def test_process_imports_previously_extracted_screenshots(self):
+    def test_process_discards_previously_extracted_candidates(self):
         self.create_image()
         inventory(self.connection, self.root)
         extract_pending(self.connection, self.root, extractor=self.extractor)
 
         result = self.command("process")
 
-        self.assertEqual(result["extraction"]["extracted"], 0)
+        self.assertEqual(result["extraction"]["extracted"], 1)
         self.assertEqual(result["import"]["imported_sources"], 1)
         self.assertEqual(len(self.command("data")["matches"]), 1)
-        self.extractor.extract.assert_called_once()
+        self.assertEqual(self.extractor.extract.call_count, 2)
 
     def test_process_automatically_links_player_screenshots(self):
         self.create_image()
         self.create_image("Screenshot (74).png", color="black")
-        self.extractor.extract.side_effect = [self.extractor.extract.return_value, {
-            "screen_type": "player_performance", "records": [{
-                "type": "player_match", "player": "Harry Kewell", "club": "Notts County",
-                "match_id": None, "rating": 7.5, "goals": 1,
-            }], "evidence": {}, "issues": [],
-        }]
+        self.extractor.extract.side_effect = [
+            self.extractor.extract.return_value,
+            {
+                "screen_type": "player_performance",
+                "records": [
+                    {
+                        "type": "player_match",
+                        "player": "Harry Kewell",
+                        "club": "Notts County",
+                        "match_id": None,
+                        "rating": 7.5,
+                        "goals": 1,
+                    }
+                ],
+                "evidence": {},
+                "issues": [],
+            },
+        ]
 
         result = self.command("process")
 
         self.assertEqual(result["import"]["imported_sources"], 2)
         self.assertEqual(result["import"]["skipped_sources"], [])
         data = self.command("data")
-        self.assertEqual(data["player_matches"][0]["match_id"], data["matches"][0]["id"])
+        self.assertEqual(
+            data["player_matches"][0]["match_id"], data["matches"][0]["id"]
+        )
 
-    def test_process_refreshes_old_missing_team_counts_without_reextract(self):
+    def test_process_rebuilds_team_counts_from_current_ocr(self):
         self.create_image()
-        self.record["team_stats"] = {"home": {"corners": None}, "away": {"corners": None}}
-        self.extractor.extract.return_value["evidence"] = {"fields": {
-            "home.corners": {"raw_text": "."}, "away.corners": {"raw_text": "."},
-        }}
+        self.record["team_stats"] = {
+            "home": {"corners": None},
+            "away": {"corners": None},
+        }
+        self.extractor.extract.return_value["evidence"] = {
+            "fields": {
+                "home.corners": {"raw_text": "."},
+                "away.corners": {"raw_text": "."},
+            }
+        }
         self.command("process")
         match_id = self.command("data")["matches"][0]["id"]
         with self.connection:
-            self.connection.execute("UPDATE extractions SET extractor_version = '1.2.0'")
+            self.connection.execute(
+                "UPDATE extractions SET extractor_version = '1.2.0'"
+            )
         self.record["team_stats"] = {"home": {"corners": 1}, "away": {"corners": 1}}
 
         result = self.command("process")
@@ -1119,22 +2118,21 @@ class CommandTests(DatabaseTestCase):
         self.assertEqual(result["extraction"]["extracted"], 1)
         self.assertEqual(result["import"]["imported_sources"], 1)
         data = self.command("data")
-        self.assertEqual(data["matches"][0]["id"], match_id)
+        self.assertNotEqual(data["matches"][0]["id"], match_id)
         self.assertEqual([team["corners"] for team in data["team_matches"]], [1, 1])
-        self.assertEqual(self.command("process")["extraction"]["extracted"], 0)
-        self.assertEqual(self.extractor.extract.call_count, 2)
+        self.assertEqual(self.command("process")["extraction"]["extracted"], 1)
+        self.assertEqual(self.extractor.extract.call_count, 3)
 
-    def test_process_clean_backs_up_reviewed_data_and_reprocesses_known_images(self):
+    def test_process_rebuilds_known_images_without_backing_up_old_data(self):
         image = self.create_image()
         original_bytes = image.read_bytes()
         self.command("process")
-        source_id = self.connection.execute("SELECT id FROM source_images").fetchone()[0]
+        source_id = self.connection.execute("SELECT id FROM source_images").fetchone()[
+            0
+        ]
         match_id = self.connection.execute("SELECT id FROM matches").fetchone()[0]
-        self.connection.close()
+        cleaned = self.command("process")
 
-        cleaned = self.command("process", "--clean")
-
-        self.assertTrue(cleaned["clean"])
         self.assertEqual(cleaned["inventory"]["new_images"], 1)
         self.assertEqual(cleaned["extraction"]["extracted"], 1)
         self.assertEqual(cleaned["extraction"]["skipped"], 0)
@@ -1142,30 +2140,35 @@ class CommandTests(DatabaseTestCase):
         self.assertEqual(len(self.command("data")["matches"]), 1)
         self.assertNotEqual(self.command("data")["matches"][0]["id"], match_id)
         self.assertEqual(image.read_bytes(), original_bytes)
-        with closing(sqlite3.connect(cleaned["backup"])) as backup:
-            self.assertEqual(backup.execute("PRAGMA integrity_check").fetchone()[0], "ok")
-            self.assertEqual(backup.execute("SELECT id FROM matches").fetchone()[0], match_id)
-            self.assertEqual(backup.execute("SELECT id FROM source_images").fetchone()[0], source_id)
-            self.assertEqual(backup.execute("SELECT COUNT(*) FROM reviews").fetchone()[0], 1)
+        self.assertNotIn("backup", cleaned)
+        self.assertFalse((self.database_path.parent / "backups").exists())
         with closing(connect(cleaned["database"])) as rebuilt:
-            self.assertNotEqual(rebuilt.execute("SELECT id FROM source_images").fetchone()[0], source_id)
-            self.assertEqual(rebuilt.execute("SELECT COUNT(*) FROM reviews").fetchone()[0], 1)
+            self.assertNotEqual(
+                rebuilt.execute("SELECT id FROM source_images").fetchone()[0], source_id
+            )
+            self.assertEqual(
+                rebuilt.execute("SELECT COUNT(*) FROM reviews").fetchone()[0], 1
+            )
             self.assertEqual(validate_database(rebuilt), [])
-        self.assertEqual(self.command("process")["extraction"]["extracted"], 0)
-        self.assertEqual(self.extractor.extract.call_count, 2)
+        self.assertEqual(self.command("process")["extraction"]["extracted"], 1)
+        self.assertEqual(self.extractor.extract.call_count, 3)
 
-    def test_clean_rebuild_uses_new_ocr_not_saved_answers(self):
+    def test_process_uses_new_ocr_not_saved_answers(self):
         self.create_image()
         self.command("process")
         document = make_review(self.connection)
         document["sources"][0]["records"][0]["home_goals"] = 3
-        approve_review(self.connection, document, "Corrected visible score", replace_reviewed=True)
+        approve_review(
+            self.connection, document, "Corrected visible score", replace_reviewed=True
+        )
         old_match = self.command("data")["matches"][0]
         path = self.root / "processing" / "corrections.json"
-        path.parent.mkdir()
-        path.write_text(json.dumps({"schema_version": 99, "sources": {}}), encoding="utf-8")
+        path.parent.mkdir(exist_ok=True)
+        path.write_text(
+            json.dumps({"schema_version": 99, "sources": {}}), encoding="utf-8"
+        )
 
-        result = self.command("process", "--clean")
+        result = self.command("process")
 
         self.assertEqual(result["import"]["skipped_sources"], [])
         rebuilt = self.command("data")["matches"][0]
@@ -1173,144 +2176,223 @@ class CommandTests(DatabaseTestCase):
         self.assertEqual(rebuilt["home_goals"], 1)
         self.assertNotEqual(rebuilt["id"], old_match["id"])
         self.assertEqual(self.record["home_goals"], 1)
-        self.assertEqual(self.command("process")["extraction"]["extracted"], 0)
+        self.assertEqual(self.command("process")["extraction"]["extracted"], 1)
 
-    def test_clean_ocr_failure_preserves_the_active_database(self):
-        from processing.__main__ import main
-
+    def test_process_ocr_failure_does_not_restore_deleted_statistics(self):
         self.create_image()
         self.command("process")
-        before = self.command("data")["matches"]
         self.extractor.extract.side_effect = ValueError("OCR could not read the image")
-        output = io.StringIO()
 
-        with redirect_stdout(output):
-            result = main(["--root", str(self.root), "--db", str(self.root / "career.sqlite"), "process", "--clean"])
+        result = self.command("process", expected_exit=1)
 
-        self.assertEqual(result, 1)
-        self.assertIn("active database was not changed", output.getvalue())
-        self.assertEqual(self.command("data")["matches"], before)
+        self.assertIn("Previous data was deleted", result["message"])
+        self.assertEqual(result["extraction"]["errors"], 1)
+        self.assertEqual(self.command("data")["matches"], [])
 
-    def test_clean_failed_import_preserves_the_active_database(self):
-        from processing.__main__ import main
-
+    def test_process_failed_import_leaves_a_new_partial_database(self):
         self.create_image()
         self.command("process")
-        before = self.command("data")["matches"]
         self.record["played_on"] = None
-        output = io.StringIO()
 
-        with redirect_stdout(output):
-            result = main(["--root", str(self.root), "--db", str(self.root / "career.sqlite"), "process", "--clean"])
+        result = self.command("process", expected_exit=1)
 
-        self.assertEqual(result, 1)
-        self.assertIn("Extracted statistics could not be imported", output.getvalue())
-        self.assertEqual(self.command("data")["matches"], before)
+        self.assertIn(
+            "Extracted statistics could not be imported", result["validation_errors"][0]
+        )
+        self.assertEqual(self.command("data")["matches"], [])
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM extractions").fetchone()[0], 1
+        )
 
-    def test_clean_non_stat_screen_does_not_block_valid_stats(self):
+    def test_process_non_stat_screen_does_not_block_valid_stats(self):
         self.create_image()
         self.create_image("Screenshot (74).png", color="black")
         self.command("process")
-        self.extractor.extract.side_effect = [self.extractor.extract.return_value, {
-            "screen_type": "dashboard", "records": [], "evidence": {}, "issues": [],
-        }]
+        self.extractor.extract.side_effect = [
+            self.extractor.extract.return_value,
+            {
+                "screen_type": "dashboard",
+                "records": [],
+                "evidence": {},
+                "issues": [],
+            },
+        ]
 
-        result = self.command("process", "--clean")
+        result = self.command("process")
 
         self.assertEqual(result["import"]["imported_sources"], 1)
         self.assertEqual(len(result["import"]["skipped_sources"]), 1)
         self.assertEqual(len(self.command("data")["matches"]), 1)
 
-    def test_clean_creates_missing_default_database_without_touching_other_sqlite(self):
-        from processing.__main__ import main
-
-        self.create_match()
+    def test_process_rebuilds_default_database_without_touching_other_sqlite(self):
+        match_id = self.create_match()
         self.connection.commit()
+        other_database = self.root / "other.sqlite"
+        backup_database(self.connection, other_database)
         self.create_image()
-        output = io.StringIO()
-        with redirect_stdout(output):
-            self.assertEqual(main(["--root", str(self.root), "process", "--clean"]), 0)
-        text = output.getvalue()
-        result = json.loads(text[text.index("{"):])
-        self.assertEqual(result["database"], str((self.root / "processing" / "data" / "career.sqlite").resolve()))
-        self.assertTrue(result["clean"])
+
+        result = self.command("process")
+
+        self.assertEqual(
+            result["database"],
+            str((self.root / "processing" / "data" / "career.sqlite").resolve()),
+        )
         self.assertNotIn("backup", result)
         self.assertEqual(result["extraction"]["extracted"], 1)
         with closing(connect(result["database"])) as rebuilt:
-            self.assertEqual(rebuilt.execute("SELECT COUNT(*) FROM matches").fetchone()[0], 1)
-        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM matches").fetchone()[0], 1)
+            self.assertEqual(
+                rebuilt.execute("SELECT COUNT(*) FROM matches").fetchone()[0], 1
+            )
+        with closing(sqlite3.connect(other_database)) as unrelated:
+            self.assertEqual(
+                unrelated.execute("SELECT id FROM matches").fetchone()[0], match_id
+            )
 
-    def test_clean_with_empty_screenshot_folder_resets_stats_and_preserves_backup(self):
+    def test_process_with_empty_screenshot_folder_rebuilds_empty_database(self):
         self.create_match()
         self.connection.commit()
 
-        result = self.command("process", "--clean")
+        result = self.command("process")
 
         self.assertEqual(result["inventory"]["files"], 0)
         self.assertEqual(result["extraction"]["extracted"], 0)
         self.assertNotIn("review_file", result)
-        self.assertIn("reset database contains no saved stats", result["message"])
+        self.assertNotIn("backup", result)
         self.assertEqual(self.command("data")["matches"], [])
-        with closing(sqlite3.connect(result["backup"])) as backup:
-            self.assertEqual(backup.execute("SELECT COUNT(*) FROM matches").fetchone()[0], 1)
+        self.assertFalse((self.database_path.parent / "backups").exists())
         self.extractor.extract.assert_not_called()
 
-    def test_clean_backup_failure_does_not_reset_existing_database(self):
+    def test_process_does_not_continue_when_folder_deletion_fails(self):
         match_id = self.create_match()
         self.connection.commit()
 
-        with patch("processing.__main__.backup_database", side_effect=OSError("Backup unavailable")):
-            with self.assertRaisesRegex(OSError, "Backup unavailable"):
-                self.command("process", "--clean")
+        with patch(
+            "processing.__main__.shutil.rmtree",
+            side_effect=OSError("Cannot remove data directory"),
+        ):
+            with self.assertRaisesRegex(OSError, "Cannot remove data directory"):
+                self.command("process")
 
-        self.assertEqual(self.connection.execute("SELECT id FROM matches").fetchone()[0], match_id)
+        self.assertEqual(
+            self.connection.execute("SELECT id FROM matches").fetchone()[0], match_id
+        )
         self.extractor.extract.assert_not_called()
 
-    def test_clean_rejects_partial_scans_before_resetting_database(self):
+    def test_process_rejects_removed_options_before_deleting_database(self):
+        from processing.__main__ import main
+
         match_id = self.create_match()
         self.connection.commit()
 
-        for arguments in (("--limit", "1"), ("--limit", "0"), ("--screenshots", "73")):
+        for arguments in (
+            ("--limit", "1"),
+            ("--screenshots", "73"),
+            ("--clean",),
+            ("--reextract",),
+            ("anything",),
+        ):
             with self.subTest(arguments=arguments):
-                with self.assertRaisesRegex(ValueError, "--clean cannot be combined"):
-                    self.command("process", "--clean", *arguments)
-                self.assertEqual(self.connection.execute("SELECT id FROM matches").fetchone()[0], match_id)
-        self.assertFalse((self.root / "backups").exists())
+                with (
+                    redirect_stderr(io.StringIO()),
+                    self.assertRaises(SystemExit) as failure,
+                ):
+                    main(["--root", str(self.root), "process", *arguments])
+                self.assertEqual(failure.exception.code, 2)
+                self.assertEqual(
+                    self.connection.execute("SELECT id FROM matches").fetchone()[0],
+                    match_id,
+                )
         self.extractor.extract.assert_not_called()
 
-    def test_clean_preserves_committed_wal_records_in_backup(self):
-        self.assertEqual(self.connection.execute("PRAGMA journal_mode = WAL").fetchone()[0], "wal")
+    def test_process_rejects_alternate_database_before_deleting_data(self):
+        from processing.__main__ import main
+
         match_id = self.create_match()
         self.connection.commit()
-        self.assertGreater((self.root / "career.sqlite-wal").stat().st_size, 0)
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as failure:
+            main(
+                [
+                    "--root",
+                    str(self.root),
+                    "--db",
+                    str(self.root / "elsewhere.sqlite"),
+                    "process",
+                ]
+            )
+        self.assertEqual(failure.exception.code, 2)
+        self.assertEqual(
+            self.connection.execute("SELECT id FROM matches").fetchone()[0], match_id
+        )
+        self.assertFalse((self.root / "elsewhere.sqlite").exists())
+        self.extractor.extract.assert_not_called()
 
-        result = self.command("process", "--clean")
+    def test_process_rejects_symlinked_data_or_processing_directory(self):
+        from processing.__main__ import main
 
-        with closing(sqlite3.connect(result["backup"])) as backup:
-            self.assertEqual(backup.execute("SELECT id FROM matches").fetchone()[0], match_id)
-        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM matches").fetchone()[0], 0)
+        outside = self.root / "outside"
+        outside.mkdir()
+        sentinel = outside / "keep.txt"
+        sentinel.write_text("preserve", encoding="utf-8")
+        for part in ("processing", "data"):
+            with self.subTest(part=part):
+                root = self.root / f"test-{part}"
+                root.mkdir()
+                link = root / "processing"
+                if part == "data":
+                    link.mkdir()
+                    link = link / "data"
+                link.symlink_to(outside, target_is_directory=True)
+                with self.assertRaisesRegex(
+                    ValueError, "symlinked processing data directory"
+                ):
+                    main(["--root", str(root), "process"])
+                self.assertEqual(sentinel.read_text(encoding="utf-8"), "preserve")
+        self.extractor.extract.assert_not_called()
+
+    def test_process_discards_previous_wal_database(self):
+        self.assertEqual(
+            self.connection.execute("PRAGMA journal_mode = WAL").fetchone()[0], "wal"
+        )
+        self.create_match()
+        self.connection.commit()
+        self.assertGreater(Path(str(self.database_path) + "-wal").stat().st_size, 0)
+
+        result = self.command("process")
+
+        self.assertNotIn("backup", result)
+        self.assertEqual(
+            self.connection.execute("PRAGMA journal_mode").fetchone()[0], "delete"
+        )
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM matches").fetchone()[0], 0
+        )
         self.assertEqual(self.command("data")["matches"], [])
 
-    def test_delete_and_replace_screenshot_never_loses_saved_stats(self):
+    def test_process_rebuilds_only_present_unique_images(self):
         original = self.create_image()
-        original_bytes = original.read_bytes()
         self.command("process")
         original.unlink()
         self.assertEqual(self.command("process")["extraction"]["extracted"], 0)
-        self.assertEqual(len(self.command("data")["matches"]), 1)
+        self.assertEqual(self.command("data")["matches"], [])
 
         self.record["played_on"] = "2018-07-05"
-        self.create_image(color="black")
+        replacement = self.create_image(color="black")
         second = self.command("process")
         self.assertEqual(second["inventory"]["new_images"], 1)
-        self.assertEqual(len(self.command("data")["matches"]), 2)
-        (self.raw / "old-image-renamed.png").write_bytes(original_bytes)
-        self.assertEqual(self.command("process")["extraction"]["extracted"], 0)
-        self.assertEqual(self.extractor.extract.call_count, 2)
+        self.assertEqual(len(self.command("data")["matches"]), 1)
+        (self.raw / "image-copy.png").write_bytes(replacement.read_bytes())
+        duplicate = self.command("process")
+        self.assertEqual(duplicate["inventory"]["files"], 2)
+        self.assertEqual(duplicate["inventory"]["new_images"], 1)
+        self.assertEqual(duplicate["extraction"]["extracted"], 1)
+        self.assertEqual(len(self.command("data")["matches"]), 1)
+        self.assertEqual(self.extractor.extract.call_count, 3)
 
     def test_process_has_no_silent_twenty_image_limit_or_image_copies(self):
         for sequence in range(21):
-            self.create_image(f"Screenshot ({sequence}).png", color=(sequence * 10, 0, 0))
+            self.create_image(
+                f"Screenshot ({sequence}).png", color=(sequence * 10, 0, 0)
+            )
         result = self.command("process")
         self.assertEqual(result["extraction"]["extracted"], 21)
         self.assertEqual(result["extraction"]["remaining"], 0)
@@ -1326,37 +2408,85 @@ class CommandTests(DatabaseTestCase):
 
 
 class ReconciliationTests(DatabaseTestCase):
-    def prepare_stats(self, *, missing_goals=False, observed_on=None, snapshot_kind="season_end"):
+    def prepare_stats(
+        self, *, missing_goals=False, observed_on=None, snapshot_kind="season_end"
+    ):
         self.create_image()
         inventory(self.connection, self.root)
         self.create_match()
         self.player_id = self.create_player("Takefusa Kubo")
-        source_id = self.connection.execute("SELECT id FROM source_images").fetchone()[0]
-        insert_entity(self.connection, "player_matches", {
-            "match_id": self.match_id, "player_id": self.player_id, "club_id": self.home_club_id,
-            "goals": None if missing_goals else 1, "assists": 1, "rating": 8.4, "displayed_position": "CAM",
-        })
-        snapshot = {"player_id": self.player_id, "club_id": self.home_club_id, "season_id": self.season_id,
-                    "source_id": source_id, "scope": "all_competitions", "snapshot_kind": snapshot_kind,
-                    "observed_on": observed_on, "appearances": 1, "goals": 1, "assists": 1, "average_rating": 8.4}
-        self.snapshot_id = insert_entity(self.connection, "player_competition_snapshots", snapshot)
+        source_id = self.connection.execute("SELECT id FROM source_images").fetchone()[
+            0
+        ]
+        insert_entity(
+            self.connection,
+            "player_matches",
+            {
+                "match_id": self.match_id,
+                "player_id": self.player_id,
+                "club_id": self.home_club_id,
+                "goals": None if missing_goals else 1,
+                "assists": 1,
+                "rating": 8.4,
+                "displayed_position": "CAM",
+            },
+        )
+        snapshot = {
+            "player_id": self.player_id,
+            "club_id": self.home_club_id,
+            "season_id": self.season_id,
+            "source_id": source_id,
+            "scope": "all_competitions",
+            "snapshot_kind": snapshot_kind,
+            "observed_on": observed_on,
+            "appearances": 1,
+            "goals": 1,
+            "assists": 1,
+            "average_rating": 8.4,
+        }
+        self.snapshot_id = insert_entity(
+            self.connection, "player_competition_snapshots", snapshot
+        )
         self.connection.commit()
 
     def test_reconciliation_counts_each_match_once_and_excludes_other_seasons(self):
         self.prepare_stats()
-        next_edition = ensure_edition(self.connection, {"competition": "Invitational Cup", "season": "2019/20"})
-        next_match = insert_entity(self.connection, "matches", {
-            "competition_season_id": next_edition, "played_on": "2019-07-07",
-            "home_club_id": self.home_club_id, "away_club_id": self.away_club_id,
-        })
-        insert_entity(self.connection, "player_matches", {"match_id": next_match, "player_id": self.player_id,
-                      "club_id": self.home_club_id, "goals": 5, "assists": 5, "rating": 10})
+        next_edition = ensure_edition(
+            self.connection, {"competition": "Invitational Cup", "season": "2019/20"}
+        )
+        next_match = insert_entity(
+            self.connection,
+            "matches",
+            {
+                "competition_season_id": next_edition,
+                "played_on": "2019-07-07",
+                "home_club_id": self.home_club_id,
+                "away_club_id": self.away_club_id,
+            },
+        )
+        insert_entity(
+            self.connection,
+            "player_matches",
+            {
+                "match_id": next_match,
+                "player_id": self.player_id,
+                "club_id": self.home_club_id,
+                "goals": 5,
+                "assists": 5,
+                "rating": 10,
+            },
+        )
         report = reconcile_totals(self.connection, "2018/19")
         result = report["comparisons"][0]
         self.assertEqual(result["result"], "match")
         self.assertEqual(result["metrics"]["goals"]["derived"], 1)
         self.assertEqual(result["metrics"]["appearances"]["derived"], 1)
-        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM player_matches").fetchone()[0], 2)
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM player_matches").fetchone()[
+                0
+            ],
+            2,
+        )
 
     def test_unconfirmed_cutoff_is_not_compared(self):
         self.prepare_stats(snapshot_kind="in_season")
@@ -1385,7 +2515,9 @@ class ReconciliationTests(DatabaseTestCase):
         self.assertEqual(goals["derived"], 0)
         self.assertEqual(goals["missing_match_values"], 0)
         self.assertEqual(goals["assumed_zero_match_values"], 1)
-        self.assertIsNone(self.connection.execute("SELECT goals FROM player_matches").fetchone()[0])
+        self.assertIsNone(
+            self.connection.execute("SELECT goals FROM player_matches").fetchone()[0]
+        )
 
     def test_dashboard_uses_the_same_goalkeeper_default_and_keeps_its_provenance(self):
         self.prepare_stats(missing_goals=True)
@@ -1397,13 +2529,26 @@ class ReconciliationTests(DatabaseTestCase):
             (None, None, None, False),
         ):
             with self.subTest(position=position, recorded=recorded):
-                self.connection.execute("UPDATE player_matches SET displayed_position = ?, goals = ?", (position, recorded))
+                self.connection.execute(
+                    "UPDATE player_matches SET displayed_position = ?, goals = ?",
+                    (position, recorded),
+                )
                 data = dashboard_data(self.connection)
                 performance = data["player_matches"][0]
                 self.assertEqual(performance["goals"], expected)
                 self.assertIs(performance["goals_assumed_zero"], assumed)
-                self.assertEqual(data["season_reconciliation"]["comparisons"][0]["metrics"]["goals"]["derived"], expected)
-                self.assertEqual(self.connection.execute("SELECT goals FROM player_matches").fetchone()[0], recorded)
+                self.assertEqual(
+                    data["season_reconciliation"]["comparisons"][0]["metrics"]["goals"][
+                        "derived"
+                    ],
+                    expected,
+                )
+                self.assertEqual(
+                    self.connection.execute(
+                        "SELECT goals FROM player_matches"
+                    ).fetchone()[0],
+                    recorded,
+                )
 
     def test_recorded_goalkeeper_goals_are_never_replaced(self):
         self.prepare_stats()
@@ -1413,14 +2558,20 @@ class ReconciliationTests(DatabaseTestCase):
         self.assertEqual(goals["derived"], 1)
         self.assertEqual(goals["assumed_zero_match_values"], 0)
 
-    def test_goalkeeper_rule_does_not_default_other_metrics_or_outfield_appearances(self):
+    def test_goalkeeper_rule_does_not_default_other_metrics_or_outfield_appearances(
+        self,
+    ):
         self.prepare_stats(missing_goals=True)
-        self.connection.execute("UPDATE player_matches SET displayed_position = 'GK', played_position = 'ST'")
+        self.connection.execute(
+            "UPDATE player_matches SET displayed_position = 'GK', played_position = 'ST'"
+        )
         goals = reconcile_totals(self.connection)["comparisons"][0]["metrics"]["goals"]
         self.assertIsNone(goals["derived"])
         self.assertEqual(goals["assumed_zero_match_values"], 0)
 
-        self.connection.execute("UPDATE player_matches SET played_position = 'GK', assists = NULL")
+        self.connection.execute(
+            "UPDATE player_matches SET played_position = 'GK', assists = NULL"
+        )
         self.connection.execute("UPDATE player_competition_snapshots SET goals = 0")
         comparison = reconcile_totals(self.connection)["comparisons"][0]
         self.assertEqual(comparison["result"], "partial_comparison")
@@ -1433,53 +2584,132 @@ class ReconciliationTests(DatabaseTestCase):
         metric = reconcile_totals(self.connection)["comparisons"][0]["metrics"]["goals"]
         self.assertEqual(metric["result"], "mismatch")
         self.assertEqual(metric["difference"], -2)
-        self.assertEqual(self.connection.execute("SELECT goals FROM player_matches").fetchone()[0], 1)
-        self.assertEqual(self.connection.execute("SELECT goals FROM player_competition_snapshots").fetchone()[0], 3)
+        self.assertEqual(
+            self.connection.execute("SELECT goals FROM player_matches").fetchone()[0], 1
+        )
+        self.assertEqual(
+            self.connection.execute(
+                "SELECT goals FROM player_competition_snapshots"
+            ).fetchone()[0],
+            3,
+        )
 
     def test_display_average_is_truncated_without_losing_raw_mean(self):
         self.prepare_stats()
-        self.connection.execute("UPDATE player_competition_snapshots SET appearances = 2, goals = 2, assists = 2, average_rating = 8.5")
-        second_match = insert_entity(self.connection, "matches", {
-            "competition_season_id": self.edition_id, "played_on": "2018-07-08",
-            "home_club_id": self.home_club_id, "away_club_id": self.away_club_id,
-        })
-        insert_entity(self.connection, "player_matches", {"match_id": second_match, "player_id": self.player_id,
-                      "club_id": self.home_club_id, "goals": 1, "assists": 1, "rating": 8.7})
-        metric = reconcile_totals(self.connection)["comparisons"][0]["metrics"]["average_rating"]
+        self.connection.execute(
+            "UPDATE player_competition_snapshots SET appearances = 2, goals = 2, assists = 2, average_rating = 8.5"
+        )
+        second_match = insert_entity(
+            self.connection,
+            "matches",
+            {
+                "competition_season_id": self.edition_id,
+                "played_on": "2018-07-08",
+                "home_club_id": self.home_club_id,
+                "away_club_id": self.away_club_id,
+            },
+        )
+        insert_entity(
+            self.connection,
+            "player_matches",
+            {
+                "match_id": second_match,
+                "player_id": self.player_id,
+                "club_id": self.home_club_id,
+                "goals": 1,
+                "assists": 1,
+                "rating": 8.7,
+            },
+        )
+        metric = reconcile_totals(self.connection)["comparisons"][0]["metrics"][
+            "average_rating"
+        ]
         self.assertEqual(metric["result"], "match")
         self.assertEqual(metric["raw_match_average"], 8.55)
         self.assertEqual(metric["derived"], 8.5)
 
     def test_dated_snapshot_excludes_later_matches(self):
         self.prepare_stats(observed_on="2018-07-04", snapshot_kind="in_season")
-        later_match = insert_entity(self.connection, "matches", {
-            "competition_season_id": self.edition_id, "played_on": "2018-07-08",
-            "home_club_id": self.home_club_id, "away_club_id": self.away_club_id,
-        })
-        insert_entity(self.connection, "player_matches", {"match_id": later_match, "player_id": self.player_id,
-                      "club_id": self.home_club_id, "goals": 5, "assists": 2, "rating": 10})
+        later_match = insert_entity(
+            self.connection,
+            "matches",
+            {
+                "competition_season_id": self.edition_id,
+                "played_on": "2018-07-08",
+                "home_club_id": self.home_club_id,
+                "away_club_id": self.away_club_id,
+            },
+        )
+        insert_entity(
+            self.connection,
+            "player_matches",
+            {
+                "match_id": later_match,
+                "player_id": self.player_id,
+                "club_id": self.home_club_id,
+                "goals": 5,
+                "assists": 2,
+                "rating": 10,
+            },
+        )
         comparison = reconcile_totals(self.connection)["comparisons"][0]
         self.assertEqual(comparison["result"], "match")
         self.assertEqual(comparison["metrics"]["appearances"]["derived"], 1)
 
     def test_competition_scope_excludes_preseason_but_season_total_includes_it(self):
         self.prepare_stats()
-        league_edition = ensure_edition(self.connection, {"competition": "EFL League Two", "season": "2018/19"})
-        league_match = insert_entity(self.connection, "matches", {
-            "competition_season_id": league_edition, "played_on": "2018-08-04",
-            "home_club_id": self.home_club_id, "away_club_id": self.away_club_id,
-        })
-        insert_entity(self.connection, "player_matches", {"match_id": league_match, "player_id": self.player_id,
-                      "club_id": self.home_club_id, "goals": 3, "assists": 0, "rating": 7.9})
-        self.connection.execute("UPDATE player_competition_snapshots SET appearances = 2, goals = 4, assists = 1, average_rating = 8.1")
-        source_id = self.connection.execute("SELECT id FROM source_images").fetchone()[0]
-        insert_entity(self.connection, "player_competition_snapshots", {
-            "player_id": self.player_id, "club_id": self.home_club_id, "season_id": self.season_id,
-            "source_id": source_id, "scope": "competition", "competition_season_id": league_edition,
-            "snapshot_kind": "season_end", "appearances": 1, "goals": 3, "assists": 0, "average_rating": 7.9,
-        })
+        league_edition = ensure_edition(
+            self.connection, {"competition": "EFL League Two", "season": "2018/19"}
+        )
+        league_match = insert_entity(
+            self.connection,
+            "matches",
+            {
+                "competition_season_id": league_edition,
+                "played_on": "2018-08-04",
+                "home_club_id": self.home_club_id,
+                "away_club_id": self.away_club_id,
+            },
+        )
+        insert_entity(
+            self.connection,
+            "player_matches",
+            {
+                "match_id": league_match,
+                "player_id": self.player_id,
+                "club_id": self.home_club_id,
+                "goals": 3,
+                "assists": 0,
+                "rating": 7.9,
+            },
+        )
+        self.connection.execute(
+            "UPDATE player_competition_snapshots SET appearances = 2, goals = 4, assists = 1, average_rating = 8.1"
+        )
+        source_id = self.connection.execute("SELECT id FROM source_images").fetchone()[
+            0
+        ]
+        insert_entity(
+            self.connection,
+            "player_competition_snapshots",
+            {
+                "player_id": self.player_id,
+                "club_id": self.home_club_id,
+                "season_id": self.season_id,
+                "source_id": source_id,
+                "scope": "competition",
+                "competition_season_id": league_edition,
+                "snapshot_kind": "season_end",
+                "appearances": 1,
+                "goals": 3,
+                "assists": 0,
+                "average_rating": 7.9,
+            },
+        )
         report = reconcile_totals(self.connection)
-        totals = {comparison["scope"]: comparison for comparison in report["comparisons"]}
+        totals = {
+            comparison["scope"]: comparison for comparison in report["comparisons"]
+        }
         self.assertEqual(totals["competition"]["result"], "match")
         self.assertEqual(totals["all_competitions"]["result"], "match")
         self.assertEqual(totals["competition"]["metrics"]["goals"]["derived"], 3)

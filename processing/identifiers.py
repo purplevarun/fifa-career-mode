@@ -2,10 +2,18 @@ from uuid import UUID, uuid4
 
 
 REFERENCE_TABLES = {
-    "source_id": "source_images", "match_source_id": "source_images", "match_id": "matches",
-    "player_id": "players", "club_id": "clubs", "home_club_id": "clubs", "away_club_id": "clubs",
-    "from_club_id": "clubs", "to_club_id": "clubs", "season_id": "seasons",
-    "competition_id": "competitions", "competition_season_id": "competition_seasons",
+    "source_id": "source_images",
+    "match_source_id": "source_images",
+    "match_id": "matches",
+    "player_id": "players",
+    "club_id": "clubs",
+    "home_club_id": "clubs",
+    "away_club_id": "clubs",
+    "from_club_id": "clubs",
+    "to_club_id": "clubs",
+    "season_id": "seasons",
+    "competition_id": "competitions",
+    "competition_season_id": "competition_seasons",
     "player_match_id": "player_matches",
 }
 
@@ -45,7 +53,9 @@ def normalize_references(connection, value, allow_legacy=False):
     result = {}
     for field, item in value.items():
         if field in REFERENCE_TABLES:
-            result[field] = resolve_id(connection, REFERENCE_TABLES[field], item, allow_legacy)
+            result[field] = resolve_id(
+                connection, REFERENCE_TABLES[field], item, allow_legacy
+            )
         else:
             result[field] = normalize_references(connection, item, allow_legacy)
     return result

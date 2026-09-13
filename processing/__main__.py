@@ -1,78 +1,140 @@
 import argparse
 import json
+import shutil
 import sqlite3
 import sys
 from contextlib import closing
 from pathlib import Path
 
-from .database import connect, coverage_report, inventory, json_text, status, validate_database
-from .identifiers import new_id
-from .pipeline import approve_review, backup_database, dashboard_data, extract_pending, import_pending, make_review, parse_sequences, record_processing_run, write_json
+from .database import (
+    connect,
+    coverage_report,
+    inventory,
+    json_text,
+    status,
+    validate_database,
+)
+from .pipeline import (
+    approve_review,
+    backup_database,
+    dashboard_data,
+    extract_pending,
+    import_pending,
+    make_review,
+    parse_sequences,
+    record_processing_run,
+    write_json,
+)
 from .reconciliation import reconcile_totals
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Process local FIFA screenshots and manage saved SQLite stats.")
-    parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parent.parent)
-    parser.add_argument("--db", type=Path, help="Database path; defaults to ROOT/processing/data/career.sqlite")
+    parser = argparse.ArgumentParser(
+        description="Process local FIFA screenshots and manage saved SQLite stats."
+    )
+    parser.add_argument(
+        "--root", type=Path, default=Path(__file__).resolve().parent.parent
+    )
+    parser.add_argument(
+        "--db",
+        type=Path,
+        help="Database path; defaults to ROOT/processing/data/career.sqlite",
+    )
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("data", help="Read saved stats as JSON for the local dashboard")
     commands.add_parser("inventory", help="Inventory images without running OCR")
-    commands.add_parser("status", help="Show canonical record counts and outstanding source states")
+    commands.add_parser(
+        "status", help="Show canonical record counts and outstanding source states"
+    )
     commands.add_parser("validate", help="Check database integrity and relationships")
-    reporter = commands.add_parser("report", help="Report fixture, player and team-stat coverage with reconciliation warnings")
+    reporter = commands.add_parser(
+        "report",
+        help="Report fixture, player and team-stat coverage with reconciliation warnings",
+    )
     reporter.add_argument("--club", default="Notts County")
-    reporter.add_argument("--output", type=Path, help="Write the full report as JSON and print its summary")
-    reconciliation = commands.add_parser("reconcile", help="Compare captured cumulative player stats with reviewed match records")
+    reporter.add_argument(
+        "--output",
+        type=Path,
+        help="Write the full report as JSON and print its summary",
+    )
+    reconciliation = commands.add_parser(
+        "reconcile",
+        help="Compare captured cumulative player stats with reviewed match records",
+    )
     reconciliation.add_argument("--season")
     reconciliation.add_argument("--club", default="Notts County")
-    reconciliation.add_argument("--rating-decimals", type=int, choices=(1, 2), default=1)
+    reconciliation.add_argument(
+        "--rating-decimals", type=int, choices=(1, 2), default=1
+    )
     reconciliation.add_argument("--output", type=Path)
-    importer = commands.add_parser("process", aliases=["import"], help="Scan raw_screenshots and automatically update saved dashboard stats")
-    importer.add_argument("--screenshots", help="Numeric selection, for example 73,76,808-810")
-    importer.add_argument("--limit", type=int, help="Optional maximum images to OCR; default processes all new images")
-    importer.add_argument("--clean", action="store_true", help="Back up and reset SQLite, then OCR all current screenshots; clears reviewed stats")
-    importer.add_argument("--reextract", action="store_true", help="Refresh OCR and fill missing stats without replacing saved values")
-    reviewer = commands.add_parser("review", help="Write an editable review document; never overwrites an existing file")
+    commands.add_parser(
+        "process",
+        help="Delete processing/data and rebuild all screenshot statistics; accepts no options",
+    )
+    reviewer = commands.add_parser(
+        "review",
+        help="Write an editable review document; never overwrites an existing file",
+    )
     reviewer.add_argument("--screenshots", help="Optional numeric screenshot selection")
-    reviewer.add_argument("--match", help="Propose an approved match UUID for the selected performance records")
+    reviewer.add_argument(
+        "--match",
+        help="Propose an approved match UUID for the selected performance records",
+    )
     reviewer.add_argument("--output", type=Path, required=True)
-    approver = commands.add_parser("approve", help="Validate and transactionally import a visually checked review document")
+    approver = commands.add_parser(
+        "approve",
+        help="Validate and transactionally import a visually checked review document",
+    )
     approver.add_argument("review_file", type=Path)
-    approver.add_argument("--note", required=True, help="Describe the source checks and any corrections")
-    approver.add_argument("--replace-reviewed", action="store_true", help="Explicitly allow corrections to existing non-null values")
-    exporter = commands.add_parser("export", help="Regenerate the read-only JSON dataset for React")
+    approver.add_argument(
+        "--note", required=True, help="Describe the source checks and any corrections"
+    )
+    approver.add_argument(
+        "--replace-reviewed",
+        action="store_true",
+        help="Explicitly allow corrections to existing non-null values",
+    )
+    exporter = commands.add_parser(
+        "export", help="Regenerate the read-only JSON dataset for React"
+    )
     exporter.add_argument("--output", type=Path)
-    backup = commands.add_parser("backup", help="Create a consistent SQLite backup, including all review history")
+    backup = commands.add_parser(
+        "backup", help="Create a consistent SQLite backup, including all review history"
+    )
     backup.add_argument("destination", type=Path)
     arguments = parser.parse_args(argv)
     root = arguments.root.resolve()
-    database_path = (arguments.db or root / "processing" / "data" / "career.sqlite").resolve()
-    reset = {}
-    if arguments.command in {"process", "import"} and arguments.clean:
-        if arguments.screenshots is not None or arguments.limit is not None:
-            raise ValueError("--clean cannot be combined with --screenshots or --limit; a clean rebuild processes all screenshots")
-        reset["clean"] = True
-        print("Clean rebuild: preparing a fresh database; existing stats stay unchanged until the rebuild passes validation.", flush=True)
-        if database_path.exists():
-            backup_path = database_path.parent / "backups" / f"{database_path.stem}-before-clean-{new_id()}.sqlite"
-            with closing(sqlite3.connect(database_path.as_uri() + "?mode=rw", uri=True)) as previous:
-                reset.update(backup_database(previous, backup_path))
-                with closing(sqlite3.connect(backup_path.as_uri() + "?mode=ro", uri=True)) as saved:
-                    if saved.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
-                        raise ValueError("Backup integrity check failed; existing database was not reset")
-                print(f"Existing database backed up to {backup_path}", flush=True)
+    data_directory = root / "processing" / "data"
+    if arguments.command == "process":
+        if arguments.db is not None:
+            parser.error(
+                "process always rebuilds ROOT/processing/data/career.sqlite; --db is not supported"
+            )
+        if data_directory.is_symlink() or data_directory.parent.is_symlink():
+            raise ValueError("Refusing to delete a symlinked processing data directory")
+        if data_directory.exists() and not data_directory.is_dir():
+            raise ValueError(f"Expected a processing data directory: {data_directory}")
+        print(
+            f"Full rebuild: deleting {data_directory}, including saved stats, backups and processing history.",
+            flush=True,
+        )
+        if data_directory.exists():
+            shutil.rmtree(data_directory)
+        data_directory.mkdir(parents=True, exist_ok=True)
+    database_path = (arguments.db or data_directory / "career.sqlite").resolve()
     if arguments.command == "data":
         if not database_path.is_file():
             raise ValueError("No local stats database yet. Run ./run process first.")
-        with closing(sqlite3.connect(database_path.as_uri() + "?mode=ro", uri=True)) as connection:
+        with closing(
+            sqlite3.connect(database_path.as_uri() + "?mode=ro", uri=True)
+        ) as connection:
             connection.row_factory = sqlite3.Row
             connection.execute("BEGIN")
             print(json_text(dashboard_data(connection)), end="")
         return 0
-    if arguments.command in {"process", "import", "inventory"}:
+    if arguments.command in {"process", "inventory"}:
         (root / "raw_screenshots").mkdir(parents=True, exist_ok=True)
-    connection = connect(":memory:" if reset else database_path)
+    connection = connect(database_path)
     try:
         if arguments.command == "inventory":
             print(json_text(inventory(connection, root)), end="")
@@ -82,65 +144,104 @@ def main(argv=None):
             report = coverage_report(connection, arguments.club)
             if arguments.output:
                 write_json(arguments.output, report)
-                print(json_text({"output": str(arguments.output), "summary": report["summary"], "warnings": report["warnings"]}), end="")
+                print(
+                    json_text(
+                        {
+                            "output": str(arguments.output),
+                            "summary": report["summary"],
+                            "warnings": report["warnings"],
+                        }
+                    ),
+                    end="",
+                )
             else:
                 print(json_text(report), end="")
         elif arguments.command == "reconcile":
-            report = reconcile_totals(connection, arguments.season, arguments.club, arguments.rating_decimals)
+            report = reconcile_totals(
+                connection, arguments.season, arguments.club, arguments.rating_decimals
+            )
             if arguments.output:
                 write_json(arguments.output, report)
-                print(json_text({"output": str(arguments.output), "summary": report["summary"]}), end="")
+                print(
+                    json_text(
+                        {"output": str(arguments.output), "summary": report["summary"]}
+                    ),
+                    end="",
+                )
             else:
                 print(json_text(report), end="")
         elif arguments.command == "validate":
             errors = validate_database(connection)
             print(json_text({"valid": not errors, "errors": errors}), end="")
             return 1 if errors else 0
-        elif arguments.command in {"process", "import"}:
+        elif arguments.command == "process":
             manifest = inventory(connection, root)
-            sequences = parse_sequences(arguments.screenshots)
-            results = extract_pending(connection, root, sequences, arguments.limit,
-                                      arguments.reextract, progress=lambda message: print(message, flush=True))
+            results = extract_pending(
+                connection, root, progress=lambda message: print(message, flush=True)
+            )
             source_ids = results.pop("processed_source_ids")
-            imported = import_pending(connection, sequences, source_ids)
-            result = {"database": str(database_path), "inventory": manifest, "extraction": results, "import": imported, **reset}
-            if reset:
-                errors = validate_database(connection)
-                for skipped in imported["skipped_sources"]:
-                    has_records = connection.execute(
-                        "SELECT 1 FROM extractions JOIN source_paths ON source_paths.source_id = extractions.source_id "
-                        "WHERE source_paths.path = ? AND json_array_length(extractions.candidate_json) > 0", (skipped["path"],),
-                    ).fetchone()
-                    if has_records:
-                        errors.append(f"Extracted statistics could not be imported: {skipped['path']}: {skipped['reason']}")
-                if results["errors"] or errors:
-                    result["validation_errors"] = errors
-                    result["message"] = "Clean rebuild failed; the active database was not changed. See extraction errors and skipped sources."
-                    print(json_text(result), end="")
-                    return 1
-            mode = "clean" if reset else "reextract" if arguments.reextract else "incremental"
-            result["processing_run"] = record_processing_run(connection, mode, results, imported)
-            if reset:
-                database_path.parent.mkdir(parents=True, exist_ok=True)
-                with closing(sqlite3.connect(database_path)) as active:
-                    connection.backup(active)
-            if imported["imported_sources"]:
-                result["message"] = "Stats saved to SQLite automatically. The local dashboard updates automatically."
-            else:
-                result["message"] = ("The reset database contains no saved stats; see extraction errors and skipped sources."
-                                     if arguments.clean else "No new stats saved. Existing stats are unchanged; see skipped sources for any unreadable or incomplete records.")
+            imported = import_pending(connection, refreshed_source_ids=source_ids)
+            errors = validate_database(connection)
+            for skipped in imported["skipped_sources"]:
+                has_records = connection.execute(
+                    "SELECT 1 FROM extractions JOIN source_paths ON source_paths.source_id = extractions.source_id "
+                    "WHERE source_paths.path = ? AND json_array_length(extractions.candidate_json) > 0",
+                    (skipped["path"],),
+                ).fetchone()
+                if has_records:
+                    errors.append(
+                        f"Extracted statistics could not be imported: {skipped['path']}: {skipped['reason']}"
+                    )
+            failed = bool(results["errors"] or errors)
+            result = {
+                "database": str(database_path),
+                "inventory": manifest,
+                "extraction": results,
+                "import": imported,
+                "validation_errors": errors,
+                "processing_run": record_processing_run(
+                    connection, "clean", results, imported
+                ),
+                "message": (
+                    "Database recreated, but processing is incomplete. Previous data was deleted; see extraction errors and skipped sources."
+                    if failed
+                    else "Database rebuilt from screenshots. The local dashboard updates automatically."
+                ),
+            }
             print(json_text(result), end="")
-            return 1 if results["errors"] else 0
+            return 1 if failed else 0
         elif arguments.command == "review":
-            review = make_review(connection, parse_sequences(arguments.screenshots), arguments.match)
+            review = make_review(
+                connection, parse_sequences(arguments.screenshots), arguments.match
+            )
             if not review["sources"]:
-                raise ValueError("No extractions are available for that selection; run ./run process first")
+                raise ValueError(
+                    "No extractions are available for that selection; run ./run process first"
+                )
             write_json(arguments.output, review, overwrite=False)
-            print(json_text({"review_file": str(arguments.output), "sources": len(review["sources"])}), end="")
+            print(
+                json_text(
+                    {
+                        "review_file": str(arguments.output),
+                        "sources": len(review["sources"]),
+                    }
+                ),
+                end="",
+            )
         elif arguments.command == "approve":
             review = json.loads(arguments.review_file.read_text(encoding="utf-8"))
-            result = approve_review(connection, review, arguments.note, arguments.replace_reviewed)
-            print(json_text({"review": result, "message": "Saved to SQLite. Refresh the local dashboard to see the changes."}), end="")
+            result = approve_review(
+                connection, review, arguments.note, arguments.replace_reviewed
+            )
+            print(
+                json_text(
+                    {
+                        "review": result,
+                        "message": "Saved to SQLite. Refresh the local dashboard to see the changes.",
+                    }
+                ),
+                end="",
+            )
         elif arguments.command == "export":
             output = arguments.output or database_path.parent / "dashboard.json"
             write_json(output, dashboard_data(connection))

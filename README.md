@@ -11,7 +11,8 @@ frontend/                   Vite/React dashboard
 run                         Commands below
 ```
 
-The launcher has two commands: `./run start` and `./run process`.
+The launcher has three commands: `./run start`, `./run process`, and `./run format`.
+`./run process` accepts no flags or other arguments and always rebuilds from scratch.
 
 ## Setup
 
@@ -21,6 +22,22 @@ Use Python 3.11+ and Node 22.12+ (or Node 24).
 python3 -m pip install -r processing/requirements.txt
 npm --prefix frontend ci
 ```
+
+## Format Code
+
+```sh
+./run format
+```
+
+This formats frontend files in place with Prettier, using the existing
+`frontend/.prettierrc` tab settings and `frontend/.gitignore` exclusions. It then
+formats Python source and tests under `processing/` with Ruff. Generated
+`processing/data/` contents, frontend build output, test results, and dependencies
+are excluded. Formatting does not process screenshots or reset the database.
+
+The command accepts no arguments and works from any working directory. Ruff is
+pinned in `processing/requirements.txt`; the setup commands above install both
+formatters.
 
 ## Open the Dashboard
 
@@ -88,7 +105,7 @@ separately from captured cumulative season snapshots. **Career records >
 Honours & events** shows Player of the Month counts by player and season, with
 the award month kept separate from its announcement date.
 
-## Add Screenshots
+## Process Screenshots
 
 Put new images into `raw_screenshots/`, then run:
 
@@ -96,27 +113,37 @@ Put new images into `raw_screenshots/`, then run:
 ./run process
 ```
 
-This inventories images, skips previously extracted content, and automatically
-saves valid OCR results as dashboard statistics in SQLite. It also imports cached
-results left pending by older processing runs. **No review or approval step is
-required.** The open dashboard updates automatically; Reload can also refresh it
-immediately.
+**Every run deletes the entire `processing/data/` folder first.** This includes
+the current database, OCR cache, saved corrections, review history, exports,
+previews, and any backups inside that folder. No automatic backup is created.
 
-Interrupted work resumes by rerunning the same command. Use `--limit 20` to OCR
-a smaller batch or `--reextract` to refresh OCR and fill missing stats. Neither
-option replaces existing non-null stats or saved corrections.
+The command then recreates `processing/data/career.sqlite`, inventories all
+remaining original screenshots, runs OCR on every distinct image, and imports
+valid statistics automatically. Previously processed images are processed again;
+identical file contents are deduplicated within the new scan. Entity UUIDs and
+processing history are regenerated on every run. Original screenshots and source
+code are not deleted or rewritten.
+
+**No flags and no review or approval step are required.** The former `--clean`,
+`--reextract`, `--limit`, and `--screenshots` options are rejected before deletion,
+as are any other arguments to `./run process`. The command always writes the main
+database and cannot be redirected with `--db`. Symlinked processing or data
+directories are rejected to avoid deleting data outside the intended location.
+
+The open main dashboard automatically detects the replacement database and
+shows the new run's processing timestamp. During processing it may show partial
+new results; old statistics are not retained as a fallback.
+
+If processing fails or is interrupted, the old data is already deleted. The new
+folder can contain partial results. Rerunning `./run process` deletes those too
+and starts from the beginning; it does not resume a cache. With no screenshots,
+the recreated database has no statistics.
 
 Unreadable single-digit player and team counts get a contrast-normalized,
 enlarged-glyph retry.
 Three-copy and five-copy readings must agree before a digit is recovered; the
 original and retry readings remain in the OCR evidence. Blank or ambiguous cells
-stay unknown. Refreshing a match summary can now fill missing team statistics
-while preserving its saved score, fixture identity, and existing values.
-
-When the OCR version changes, normal processing also retries previously unreadable
-numeric cells whose linked player or team stats are still missing. Each source is
-retried once per version; existing corrections are retained, and sources without
-missing numeric values are not re-extracted unless `--reextract` is requested.
+stay unknown. Each rebuild uses the current OCR implementation on every image.
 
 Supported screens include:
 
@@ -129,12 +156,6 @@ signings or wins. Missing years, selling clubs, fees and competition context sta
 unknown. Contract offers are not mistaken for transfer fees. News surnames are
 matched to existing players only when unambiguous.
 
-Previously scanned transfer/news/winner screens and award-bearing dashboards are
-retried once when their OCR version changes. Newly read fields and additional
-events are imported without replacing saved values. Previously recorded player
-and club name corrections are reused when the OCR spelling maps unambiguously
-to an existing identity.
-
 Player and goalkeeper screenshots are linked to the preceding match summary in
 numeric screenshot order. An unrelated or unrecognized screen breaks that
 context, so a player is never automatically attached across it. Goalkeeper
@@ -142,66 +163,41 @@ counts that include penalties are separated from the recorded shootout score.
 
 Each source is validated and saved in its own transaction. Unsupported screens,
 missing required context, and conflicting records are reported under
-`import.skipped_sources`; they do not block other valid screenshots. Their OCR
-results remain available for later processing. Automatically imported values
+`import.skipped_sources`; they do not block attempts to import other valid
+screenshots. OCR failures, unimportable extracted records, and database validation
+errors produce a nonzero exit code and an incomplete result, not a rollback to
+the deleted database. Screens with no supported statistics can be skipped.
+Automatically imported values
 are not manually verified, so OCR mistakes that pass validation can still occur.
-Existing saved stats and their identifiers are preserved.
 
 ## OCR Reliability
 
 OCR improvements are implemented in the processor and tested against values
 visible in original screenshots. Processing does not load a saved-answer file
-to override fresh extraction. Incremental processing still preserves existing
-SQLite corrections and learned aliases, but a clean rebuild starts without them.
+to override fresh extraction. Each rebuild starts without earlier SQLite-only
+corrections or learned aliases, so its results may differ from manually corrected
+archives.
 Recognition and relationship validation cannot guarantee 100% accuracy for
 arbitrary screenshots. Unsupported screens and missing context are reported;
 zero coverage warnings does not mean every screenshot yielded a record.
 
-## Rebuild From Scratch
-
-```sh
-./run process --clean
-```
-
-This backs up the existing database to a unique file under
-`processing/data/backups/` and verifies that backup. It then runs OCR and imports
-into a fresh, isolated in-memory database while the active database stays
-unchanged. Database validation must pass and every extracted record must import
-successfully before SQLite's backup API replaces the active database. OCR errors,
-failed imports, or database integrity errors leave the active database untouched.
-Screens with no extracted statistics can be skipped. If no database exists,
-one is created only after a successful rebuild.
-
-**A successful rebuild regenerates IDs and clears saved corrections, learned
-aliases, and processing history.** It rebuilds from screenshots using the current
-OCR code, so its results are not guaranteed to reproduce every earlier manual
-correction. Only screenshots still present can be processed again; deleted originals cannot be reconstructed.
-With an empty screenshot folder, the rebuilt database has no stats. Valid new
-OCR results are saved automatically; no approval step follows the rebuild.
-
-Original images, existing backups, and old review files are not deleted. Record
-IDs are regenerated, so old review files must not be replayed after a reset. `--clean`
-cannot be combined with `--limit` or `--screenshots`; it is a full rebuild. After
-an interruption during a clean rebuild, the active database remains unchanged
-and a new clean attempt starts over. Ordinary incremental processing still keeps
-completed extraction work and resumes with plain `./run process`.
-For an OCR refresh that keeps reviewed stats, use `./run process --reextract`
-instead.
-
 ## Delete Old Screenshots
 
-You can delete old images after checking their results. **Deleting screenshots
-does not delete saved matches or player stats.** Images are tracked by their
-content hash in the local database, not by the highest filename number:
+**Keep the original screenshots for any statistics you want to rebuild.** Deleting
+an image does not immediately change the displayed database, but the next
+`./run process` rebuilds from only the remaining files. Data supported only by
+deleted originals will be lost. Images are identified by content hash, not by
+the highest filename number:
 
 - A new image reusing an old filename is processed.
-- The same image renamed or copied is not processed twice.
-- An empty screenshot folder does not clear the database unless you use `--clean`.
-- The website does not need screenshots to display saved stats.
+- Identical copied files are processed once per rebuild.
+- An empty screenshot folder produces an empty database on the next run.
+- The website reads SQLite; it does not need the images until processing runs again.
 
 Keep `processing/data/career.sqlite`: it contains the stats, review history, and
-small processing checkpoints. It is not committed to Git. Processing does not
-make another permanent copy of your images or delete them automatically.
+small processing checkpoints. It is not committed to Git and is replaced on
+every processing run. Processing does not make another permanent copy of your
+images or delete the originals automatically.
 
 ## Optional Maintenance
 
@@ -210,11 +206,13 @@ Python and npm; they are not additional `./run` commands.
 
 `review` and `approve` remain optional maintenance tools for intentional manual
 corrections, not requirements for processing. Replacing existing values through
-those tools still requires `--replace-reviewed`.
+those tools still requires `--replace-reviewed`; those manual changes are lost
+on the next full processing run. Store any manual backup **outside**
+`processing/data/` if it needs to survive processing.
 
 ```sh
 python3 -m processing status
-python3 -m processing backup processing/data/backups/my-backup.sqlite
+python3 -m processing backup backups/my-backup.sqlite
 python3 -W error::ResourceWarning -m unittest discover -s processing/tests -q
 npm --prefix frontend test
 npm --prefix frontend run lint
@@ -222,8 +220,7 @@ npm --prefix frontend run build
 npm --prefix frontend run test:e2e
 ```
 
-Use a new backup filename each time. The reviewed database and its recovery copy
-were preserved during this cleanup. Git history is not rewritten automatically.
+Use a new backup filename each time. Git history is not rewritten automatically.
 
 `npm --prefix frontend run preview` opens a production build locally and uses
 the same SQLite endpoint. A static upload to a hosting provider is not part of

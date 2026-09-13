@@ -17,18 +17,32 @@ class IdentifierTests(unittest.TestCase):
         identifiers = {new_id() for index in range(100)}
         self.assertEqual(len(identifiers), 100)
         self.assertTrue(all(is_uuid(identifier) for identifier in identifiers))
-        for invalid in (1, "1", True, None, "", "a" * 64, "00000000-0000-0000-0000-000000000000"):
+        for invalid in (
+            1,
+            "1",
+            True,
+            None,
+            "",
+            "a" * 64,
+            "00000000-0000-0000-0000-000000000000",
+        ):
             self.assertFalse(is_uuid(invalid))
 
     def test_legacy_ids_resolve_only_with_explicit_compatibility(self):
         with closing(sqlite3.connect(":memory:")) as connection:
-            connection.execute("CREATE TABLE legacy_ids(entity_table TEXT, old_value TEXT, uuid TEXT)")
+            connection.execute(
+                "CREATE TABLE legacy_ids(entity_table TEXT, old_value TEXT, uuid TEXT)"
+            )
             identifier = new_id()
-            connection.execute("INSERT INTO legacy_ids VALUES ('matches', '1', ?)", (identifier,))
+            connection.execute(
+                "INSERT INTO legacy_ids VALUES ('matches', '1', ?)", (identifier,)
+            )
             self.assertEqual(resolve_id(connection, "matches", identifier), identifier)
             with self.assertRaises(ValueError):
                 resolve_id(connection, "matches", 1)
-            self.assertEqual(resolve_id(connection, "matches", 1, allow_legacy=True), identifier)
+            self.assertEqual(
+                resolve_id(connection, "matches", 1, allow_legacy=True), identifier
+            )
             with self.assertRaises(ValueError):
                 resolve_id(connection, "players", 1, allow_legacy=True)
 
@@ -46,29 +60,59 @@ class IdentifierTests(unittest.TestCase):
                 PRAGMA user_version = 2;
             """)
             source_hash = "a" * 64
-            connection.execute("INSERT INTO source_images VALUES (?, 10, 40, 20)", (source_hash,))
-            connection.execute("INSERT INTO source_paths VALUES ('raw_screenshots/example.png', ?, 1, 1)", (source_hash,))
-            connection.execute("INSERT INTO players VALUES (1, 'Aaron Ramsdale', 'England')")
+            connection.execute(
+                "INSERT INTO source_images VALUES (?, 10, 40, 20)", (source_hash,)
+            )
+            connection.execute(
+                "INSERT INTO source_paths VALUES ('raw_screenshots/example.png', ?, 1, 1)",
+                (source_hash,),
+            )
+            connection.execute(
+                "INSERT INTO players VALUES (1, 'Aaron Ramsdale', 'England')"
+            )
             connection.execute("INSERT INTO player_aliases VALUES ('a. ramsdale', 1)")
             for revision, goals in ((1, 0), (2, 1), (3, 0)):
-                payload = json.dumps({"complete": True, "records": [{"player_id": 1, "goals": goals}]})
-                connection.execute("INSERT INTO reviews VALUES (?, ?, ?, ?, 'Checked', '2026-09-10')",
-                                   (revision, source_hash, payload, str(revision)))
+                payload = json.dumps(
+                    {"complete": True, "records": [{"player_id": 1, "goals": goals}]}
+                )
+                connection.execute(
+                    "INSERT INTO reviews VALUES (?, ?, ?, ?, 'Checked', '2026-09-10')",
+                    (revision, source_hash, payload, str(revision)),
+                )
             connection.commit()
-            schema = (Path(__file__).resolve().parents[2] / "processing/schema.sql").read_text()
+            schema = (
+                Path(__file__).resolve().parents[2] / "processing/schema.sql"
+            ).read_text()
             backup_path = migrate_to_uuids(connection, path, schema)
             player_id = connection.execute("SELECT id FROM players").fetchone()[0]
             self.assertTrue(is_uuid(player_id))
-            self.assertEqual(connection.execute("SELECT player_id FROM player_aliases").fetchone()[0], player_id)
-            image = connection.execute("SELECT id, sha256 FROM source_images").fetchone()
+            self.assertEqual(
+                connection.execute("SELECT player_id FROM player_aliases").fetchone()[
+                    0
+                ],
+                player_id,
+            )
+            image = connection.execute(
+                "SELECT id, sha256 FROM source_images"
+            ).fetchone()
             self.assertTrue(is_uuid(image["id"]))
             self.assertEqual(image["sha256"], source_hash)
-            self.assertEqual(connection.execute("SELECT source_id FROM source_paths").fetchone()[0], image["id"])
-            reviews = connection.execute("SELECT * FROM reviews ORDER BY revision").fetchall()
+            self.assertEqual(
+                connection.execute("SELECT source_id FROM source_paths").fetchone()[0],
+                image["id"],
+            )
+            reviews = connection.execute(
+                "SELECT * FROM reviews ORDER BY revision"
+            ).fetchall()
             self.assertEqual([row["revision"] for row in reviews], [1, 2, 3])
             self.assertTrue(all(is_uuid(row["id"]) for row in reviews))
-            self.assertEqual(json.loads(reviews[-1]["payload_json"])["records"][0], {"player_id": player_id, "goals": 0})
-            self.assertEqual(connection.execute("PRAGMA foreign_key_check").fetchall(), [])
+            self.assertEqual(
+                json.loads(reviews[-1]["payload_json"])["records"][0],
+                {"player_id": player_id, "goals": 0},
+            )
+            self.assertEqual(
+                connection.execute("PRAGMA foreign_key_check").fetchall(), []
+            )
             self.assertTrue(backup_path.exists())
             connection.close()
 
@@ -76,22 +120,55 @@ class IdentifierTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "raw_screenshots").mkdir()
-            Image.new("RGB", (40, 20), "white").save(root / "raw_screenshots/Screenshot (73).png")
+            Image.new("RGB", (40, 20), "white").save(
+                root / "raw_screenshots/Screenshot (73).png"
+            )
             connection = connect(root / "career.sqlite")
             self.assertEqual(inventory(connection, root)["new_images"], 1)
-            source = connection.execute("SELECT id, sha256 FROM source_images").fetchone()
+            source = connection.execute(
+                "SELECT id, sha256 FROM source_images"
+            ).fetchone()
             self.assertTrue(is_uuid(source["id"]))
             self.assertEqual(len(source["sha256"]), 64)
             self.assertEqual(inventory(connection, root)["new_images"], 0)
-            self.assertEqual(connection.execute("SELECT id FROM source_images").fetchone()[0], source["id"])
-            fixture = {"type": "match", "season": "2018/19", "competition": "European International Cup",
-                       "played_on": "2018-07-04", "home_club": "Notts County", "away_club": "Dundee FC",
-                       "home_goals": 1, "away_goals": 1}
-            review = {"schema_version": 3, "sources": [{"source_id": source["id"], "complete": True, "records": [fixture]}]}
+            self.assertEqual(
+                connection.execute("SELECT id FROM source_images").fetchone()[0],
+                source["id"],
+            )
+            fixture = {
+                "type": "match",
+                "season": "2018/19",
+                "competition": "European International Cup",
+                "played_on": "2018-07-04",
+                "home_club": "Notts County",
+                "away_club": "Dundee FC",
+                "home_goals": 1,
+                "away_goals": 1,
+            }
+            review = {
+                "schema_version": 3,
+                "sources": [
+                    {"source_id": source["id"], "complete": True, "records": [fixture]}
+                ],
+            }
             approve_review(connection, review, "UUID smoke test")
-            self.assertEqual(approve_review(connection, review, "Repeat")["skipped_reviews"], 1)
-            for table in ("matches", "clubs", "seasons", "competitions", "competition_seasons", "reviews"):
-                self.assertTrue(all(is_uuid(row[0]) for row in connection.execute(f"SELECT id FROM {table}")))
+            self.assertEqual(
+                approve_review(connection, review, "Repeat")["skipped_reviews"], 1
+            )
+            for table in (
+                "matches",
+                "clubs",
+                "seasons",
+                "competitions",
+                "competition_seasons",
+                "reviews",
+            ):
+                self.assertTrue(
+                    all(
+                        is_uuid(row[0])
+                        for row in connection.execute(f"SELECT id FROM {table}")
+                    )
+                )
             self.assertEqual(validate_database(connection), [])
             connection.close()
 
@@ -107,14 +184,25 @@ class IdentifierTests(unittest.TestCase):
                 INSERT INTO player_aliases VALUES ('broken alias', 999);
                 PRAGMA user_version = 2;
             """)
-            schema = (Path(__file__).resolve().parents[2] / "processing/schema.sql").read_text()
+            schema = (
+                Path(__file__).resolve().parents[2] / "processing/schema.sql"
+            ).read_text()
             with self.assertRaises(KeyError):
                 migrate_to_uuids(connection, path, schema)
             self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 2)
-            self.assertEqual(tuple(connection.execute("SELECT * FROM players").fetchone()), (1, "Original Player"))
-            self.assertIsNone(connection.execute("SELECT name FROM sqlite_master WHERE name = 'legacy_players'").fetchone())
+            self.assertEqual(
+                tuple(connection.execute("SELECT * FROM players").fetchone()),
+                (1, "Original Player"),
+            )
+            self.assertIsNone(
+                connection.execute(
+                    "SELECT name FROM sqlite_master WHERE name = 'legacy_players'"
+                ).fetchone()
+            )
             self.assertEqual(connection.execute("PRAGMA foreign_keys").fetchone()[0], 1)
-            self.assertEqual(len(list((Path(directory) / "backups").glob("*.sqlite"))), 1)
+            self.assertEqual(
+                len(list((Path(directory) / "backups").glob("*.sqlite"))), 1
+            )
             connection.close()
 
 

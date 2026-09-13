@@ -9,7 +9,15 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 from . import EXTRACTOR_VERSION, SCHEMA_VERSION
-from .database import EXPORT_TABLES, coverage_report, image_hash, insert_entity, json_text, status, validate_database
+from .database import (
+    EXPORT_TABLES,
+    coverage_report,
+    image_hash,
+    insert_entity,
+    json_text,
+    status,
+    validate_database,
+)
 from .identifiers import is_uuid, normalize_references
 from .reconciliation import player_match_goals, reconcile_totals
 
@@ -17,14 +25,29 @@ from .reconciliation import player_match_goals, reconcile_totals
 BOOLEAN_FIELDS = {"is_preseason", "extra_time", "started"}
 NON_MATCH_SCREEN_TYPES = {"transfer", "news", "competition_result", "dashboard_award"}
 RECORD_TABLES = {
-    "match": "matches", "player_match": "player_matches", "player_snapshot": "player_snapshots",
+    "match": "matches",
+    "player_match": "player_matches",
+    "player_snapshot": "player_snapshots",
     "player_competition_snapshot": "player_competition_snapshots",
-    "player_transfer": "player_transfers", "competition_event": "competition_events",
+    "player_transfer": "player_transfers",
+    "competition_event": "competition_events",
 }
 CONTEXT_FIELDS = {
-    "type", "player", "player_id", "nationality", "club", "season", "competition",
-    "competition_kind", "is_preseason", "home_club", "away_club", "team_stats",
-    "match_source_id", "from_club", "to_club",
+    "type",
+    "player",
+    "player_id",
+    "nationality",
+    "club",
+    "season",
+    "competition",
+    "competition_kind",
+    "is_preseason",
+    "home_club",
+    "away_club",
+    "team_stats",
+    "match_source_id",
+    "from_club",
+    "to_club",
 }
 
 
@@ -35,7 +58,9 @@ def parse_sequences(value):
     for part in value.split(","):
         matched = re.fullmatch(r"\s*(\d+)(?:-(\d+))?\s*", part)
         if not matched:
-            raise ValueError(f"Invalid screenshot selection: {part!r}; use 73,76,808-810")
+            raise ValueError(
+                f"Invalid screenshot selection: {part!r}; use 73,76,808-810"
+            )
         start = int(matched.group(1))
         end = int(matched.group(2) or start)
         if end < start or end - start > 10000:
@@ -57,8 +82,16 @@ def select_sources(connection, sequences=None, source_ids=None):
             continue
         found.add(path["sequence"])
         if path["source_id"] not in selected:
-            source = dict(connection.execute("SELECT * FROM source_images WHERE id = ?", (path["source_id"],)).fetchone())
-            selected[path["source_id"]] = {**source, "path": path["path"], "sequence": path["sequence"]}
+            source = dict(
+                connection.execute(
+                    "SELECT * FROM source_images WHERE id = ?", (path["source_id"],)
+                ).fetchone()
+            )
+            selected[path["source_id"]] = {
+                **source,
+                "path": path["path"],
+                "sequence": path["sequence"],
+            }
     if sequences is not None and sequences - found:
         raise ValueError(f"Screenshot numbers not found: {sorted(sequences - found)}")
     return list(selected.values())
@@ -75,41 +108,88 @@ def needs_numeric_refresh(connection, source, evidence_json):
         records = connection.execute(
             "SELECT team.*, CASE WHEN team.club_id = fixture.home_club_id THEN 'home' ELSE 'away' END AS side "
             "FROM team_matches AS team JOIN matches AS fixture ON fixture.id = team.match_id "
-            "JOIN match_sources AS source ON source.match_id = team.match_id WHERE source.source_id = ?", (source["id"],),
+            "JOIN match_sources AS source ON source.match_id = team.match_id WHERE source.source_id = ?",
+            (source["id"],),
         ).fetchall()
     else:
-        fields = GOALKEEPER_ROWS if source["screen_type"] == "goalkeeper_performance" else OUTFIELD_ROWS
+        fields = (
+            GOALKEEPER_ROWS
+            if source["screen_type"] == "goalkeeper_performance"
+            else OUTFIELD_ROWS
+        )
         records = connection.execute(
             "SELECT appearance.* FROM player_matches AS appearance JOIN player_match_sources AS source "
-            "ON source.player_match_id = appearance.id WHERE source.source_id = ?", (source["id"],),
+            "ON source.player_match_id = appearance.id WHERE source.source_id = ?",
+            (source["id"],),
         ).fetchall()
     for record in records:
         for field in fields:
             if "/" in field or field.endswith("_pct") or record[field] is not None:
                 continue
-            key = f"{record['side']}.{field}" if source["screen_type"] == "match_facts" else field
-            if key in readings and parse_integer(readings[key].get("raw_text", "")) is None:
+            key = (
+                f"{record['side']}.{field}"
+                if source["screen_type"] == "match_facts"
+                else field
+            )
+            if (
+                key in readings
+                and parse_integer(readings[key].get("raw_text", "")) is None
+            ):
                 return True
     return False
 
 
-def extract_pending(connection, root, sequences=None, limit=None, reextract=False, extractor=None, progress=None):
+def extract_pending(
+    connection,
+    root,
+    sequences=None,
+    limit=None,
+    reextract=False,
+    extractor=None,
+    progress=None,
+):
     if limit is not None and limit < 1:
         raise ValueError("The extraction limit must be at least one")
     sources = select_sources(connection, sequences)
-    counts = {"extracted": 0, "skipped": 0, "errors": 0, "remaining": 0, "processed_source_ids": []}
+    counts = {
+        "extracted": 0,
+        "skipped": 0,
+        "errors": 0,
+        "remaining": 0,
+        "processed_source_ids": [],
+    }
     attempted = 0
     for source in sources:
-        existing = connection.execute("SELECT extractor_version, evidence_json FROM extractions WHERE source_id = ?", (source["id"],)).fetchone()
-        updated_layout = existing and existing["extractor_version"] != EXTRACTOR_VERSION and source["screen_type"] in NON_MATCH_SCREEN_TYPES
-        if (existing and existing["extractor_version"] != EXTRACTOR_VERSION
-                and source["screen_type"] in {"match_facts", "player_performance", "goalkeeper_performance"}):
-            updated_layout = needs_numeric_refresh(connection, source, existing["evidence_json"])
-        if existing and existing["extractor_version"] != EXTRACTOR_VERSION and source["screen_type"] == "dashboard":
+        existing = connection.execute(
+            "SELECT extractor_version, evidence_json FROM extractions WHERE source_id = ?",
+            (source["id"],),
+        ).fetchone()
+        updated_layout = (
+            existing
+            and existing["extractor_version"] != EXTRACTOR_VERSION
+            and source["screen_type"] in NON_MATCH_SCREEN_TYPES
+        )
+        if (
+            existing
+            and existing["extractor_version"] != EXTRACTOR_VERSION
+            and source["screen_type"]
+            in {"match_facts", "player_performance", "goalkeeper_performance"}
+        ):
+            updated_layout = needs_numeric_refresh(
+                connection, source, existing["evidence_json"]
+            )
+        if (
+            existing
+            and existing["extractor_version"] != EXTRACTOR_VERSION
+            and source["screen_type"] == "dashboard"
+        ):
             from .extraction import classify
 
             tokens = json.loads(existing["evidence_json"]).get("full_image_tokens", [])
-            updated_layout = classify(" ".join(token["text"] for token in tokens)) == "dashboard_award"
+            updated_layout = (
+                classify(" ".join(token["text"] for token in tokens))
+                == "dashboard_award"
+            )
         if existing and not reextract and not updated_layout:
             counts["skipped"] += 1
             continue
@@ -138,8 +218,13 @@ def extract_pending(connection, root, sequences=None, limit=None, reextract=Fals
                     "VALUES (?, ?, ?, ?, ?) ON CONFLICT(source_id) DO UPDATE SET "
                     "extractor_version = excluded.extractor_version, candidate_json = excluded.candidate_json, "
                     "evidence_json = excluded.evidence_json, issues_json = excluded.issues_json, extracted_at = CURRENT_TIMESTAMP",
-                    (source["id"], EXTRACTOR_VERSION, json_text(result["records"]),
-                     json_text(result["evidence"]), json_text(result["issues"])),
+                    (
+                        source["id"],
+                        EXTRACTOR_VERSION,
+                        json_text(result["records"]),
+                        json_text(result["evidence"]),
+                        json_text(result["issues"]),
+                    ),
                 )
                 connection.execute(
                     "UPDATE source_images SET screen_type = ?, error = NULL, "
@@ -165,81 +250,159 @@ def resolve_candidate_players(connection, extraction):
     players = connection.execute("SELECT id, name FROM players").fetchall()
     for record in extraction["records"]:
         name = record.get("player")
-        if record.get("type") not in {"player_transfer", "competition_event"} or not name or record.get("player_id"):
+        if (
+            record.get("type") not in {"player_transfer", "competition_event"}
+            or not name
+            or record.get("player_id")
+        ):
             continue
         normalized = normalized_name(name).casefold()
-        alias = connection.execute("SELECT player_id FROM player_aliases WHERE alias = ?", (normalized,)).fetchone()
-        exact = [player for player in players if player["name"].casefold() == normalized or (alias and player["id"] == alias[0])]
-        matching = exact or [player for player in players if player["name"].casefold().endswith(f" {normalized}")]
+        alias = connection.execute(
+            "SELECT player_id FROM player_aliases WHERE alias = ?", (normalized,)
+        ).fetchone()
+        exact = [
+            player
+            for player in players
+            if player["name"].casefold() == normalized
+            or (alias and player["id"] == alias[0])
+        ]
+        matching = exact or [
+            player
+            for player in players
+            if player["name"].casefold().endswith(f" {normalized}")
+        ]
         if len(matching) == 1:
             record["player_id"] = matching[0]["id"]
             record["player"] = matching[0]["name"]
             if not exact:
-                extraction["issues"].append(f"OCR name {name!r} matched existing player {record['player']!r}; confirm this identity.")
+                extraction["issues"].append(
+                    f"OCR name {name!r} matched existing player {record['player']!r}; confirm this identity."
+                )
         elif len(matching) > 1:
-            extraction["issues"].append(f"Ambiguous OCR player {name!r}; select the correct existing player_id during review.")
+            extraction["issues"].append(
+                f"Ambiguous OCR player {name!r}; select the correct existing player_id during review."
+            )
 
 
 def make_review(connection, sequences=None, match_id=None, source_ids=None):
-    if match_id is not None and (not is_uuid(match_id) or not connection.execute("SELECT 1 FROM matches WHERE id = ?", (match_id,)).fetchone()):
+    if match_id is not None and (
+        not is_uuid(match_id)
+        or not connection.execute(
+            "SELECT 1 FROM matches WHERE id = ?", (match_id,)
+        ).fetchone()
+    ):
         raise ValueError(f"Unknown match ID: {match_id}")
     sources = []
     for source in select_sources(connection, sequences, source_ids):
-        extraction = connection.execute("SELECT * FROM extractions WHERE source_id = ?", (source["id"],)).fetchone()
+        extraction = connection.execute(
+            "SELECT * FROM extractions WHERE source_id = ?", (source["id"],)
+        ).fetchone()
         if not extraction:
             continue
         latest = connection.execute(
-            "SELECT payload_json FROM reviews WHERE source_id = ? ORDER BY revision DESC LIMIT 1", (source["id"],),
+            "SELECT payload_json FROM reviews WHERE source_id = ? ORDER BY revision DESC LIMIT 1",
+            (source["id"],),
         ).fetchone()
         previous = json.loads(latest["payload_json"]) if latest else None
         candidates = json.loads(extraction["candidate_json"])
         records = previous["records"] if previous else candidates
         complete = previous["complete"] if previous else False
         issues = json.loads(extraction["issues_json"])
-        if (previous and source["screen_type"] == "match_facts" and len(records) == len(candidates) == 1
-                and records[0].get("type") == candidates[0].get("type") == "match"):
+        if (
+            previous
+            and source["screen_type"] == "match_facts"
+            and len(records) == len(candidates) == 1
+            and records[0].get("type") == candidates[0].get("type") == "match"
+        ):
             for side, stats in candidates[0].get("team_stats", {}).items():
-                saved_stats = records[0].setdefault("team_stats", {}).setdefault(side, {})
-                additions = {field: value for field, value in stats.items() if saved_stats.get(field) is None and value is not None}
+                saved_stats = (
+                    records[0].setdefault("team_stats", {}).setdefault(side, {})
+                )
+                additions = {
+                    field: value
+                    for field, value in stats.items()
+                    if saved_stats.get(field) is None and value is not None
+                }
                 if additions:
                     saved_stats.update(additions)
                     complete = False
-                    issues.append(f"New {side} team fields were added from OCR; existing scores, fixture identity and saved values are retained.")
-        if (previous and source["screen_type"] in {"player_performance", "goalkeeper_performance"}
-                and len(records) == len(candidates) == 1
-                and records[0].get("type") == candidates[0].get("type") == "player_match"):
-            additions = {field: value for field, value in candidates[0].items()
-                         if field not in CONTEXT_FIELDS and not field.endswith("_id")
-                         and records[0].get(field) is None and value is not None}
+                    issues.append(
+                        f"New {side} team fields were added from OCR; existing scores, fixture identity and saved values are retained."
+                    )
+        if (
+            previous
+            and source["screen_type"]
+            in {"player_performance", "goalkeeper_performance"}
+            and len(records) == len(candidates) == 1
+            and records[0].get("type") == candidates[0].get("type") == "player_match"
+        ):
+            additions = {
+                field: value
+                for field, value in candidates[0].items()
+                if field not in CONTEXT_FIELDS
+                and not field.endswith("_id")
+                and records[0].get(field) is None
+                and value is not None
+            }
             if additions:
                 records[0].update(additions)
                 complete = False
-                issues.append("Unreviewed player fields were added from OCR; existing identities, fixture links and reviewed values are retained.")
+                issues.append(
+                    "Unreviewed player fields were added from OCR; existing identities, fixture links and reviewed values are retained."
+                )
         if previous and source["screen_type"] in NON_MATCH_SCREEN_TYPES:
             for candidate in candidates:
-                if candidate.get("type") not in {"player_transfer", "competition_event"}:
+                if candidate.get("type") not in {
+                    "player_transfer",
+                    "competition_event",
+                }:
                     continue
-                key_fields = (("type", "player", "transfer_type") if candidate["type"] == "player_transfer"
-                              else ("type", "event_type", "player", "club", "period"))
-                reviewed = next((record for record in records if all(record.get(field) == candidate.get(field) for field in key_fields)), None)
+                key_fields = (
+                    ("type", "player", "transfer_type")
+                    if candidate["type"] == "player_transfer"
+                    else ("type", "event_type", "player", "club", "period")
+                )
+                reviewed = next(
+                    (
+                        record
+                        for record in records
+                        if all(
+                            record.get(field) == candidate.get(field)
+                            for field in key_fields
+                        )
+                    ),
+                    None,
+                )
                 if reviewed is None:
                     records.append(candidate)
                     complete = False
                 else:
-                    additions = {field: value for field, value in candidate.items() if reviewed.get(field) is None and value is not None}
+                    additions = {
+                        field: value
+                        for field, value in candidate.items()
+                        if reviewed.get(field) is None and value is not None
+                    }
                     if additions:
                         reviewed.update(additions)
                         complete = False
-            issues.append("New non-match OCR may fill unknown fields or add events; existing reviewed values are retained.")
+            issues.append(
+                "New non-match OCR may fill unknown fields or add events; existing reviewed values are retained."
+            )
         if match_id is not None:
             for record in records:
                 if record.get("type") == "player_match":
                     record["match_id"] = match_id
                     record.pop("match_source_id", None)
-        sources.append({
-            "source_id": source["id"], "path": source["path"], "screen_type": source["screen_type"],
-            "complete": complete, "records": records, "issues": issues,
-        })
+        sources.append(
+            {
+                "source_id": source["id"],
+                "path": source["path"],
+                "screen_type": source["screen_type"],
+                "complete": complete,
+                "records": records,
+                "issues": issues,
+            }
+        )
     return {"schema_version": SCHEMA_VERSION, "sources": sources}
 
 
@@ -252,37 +415,63 @@ def normalized_name(value):
 def ensure_club(connection, name):
     name = normalized_name(name)
     alias = name.casefold()
-    existing = connection.execute("SELECT club_id FROM club_aliases WHERE alias = ?", (alias,)).fetchone()
+    existing = connection.execute(
+        "SELECT club_id FROM club_aliases WHERE alias = ?", (alias,)
+    ).fetchone()
     if existing:
         return existing["club_id"]
-    existing = connection.execute("SELECT id FROM clubs WHERE name = ? COLLATE NOCASE", (name,)).fetchone()
-    club_id = existing["id"] if existing else insert_entity(connection, "clubs", {"name": name})
-    connection.execute("INSERT INTO club_aliases(alias, club_id) VALUES (?, ?)", (alias, club_id))
+    existing = connection.execute(
+        "SELECT id FROM clubs WHERE name = ? COLLATE NOCASE", (name,)
+    ).fetchone()
+    club_id = (
+        existing["id"]
+        if existing
+        else insert_entity(connection, "clubs", {"name": name})
+    )
+    connection.execute(
+        "INSERT INTO club_aliases(alias, club_id) VALUES (?, ?)", (alias, club_id)
+    )
     return club_id
 
 
 def ensure_player(connection, record):
     name = normalized_name(record.get("player"))
     alias = name.casefold()
-    existing = connection.execute("SELECT player_id FROM player_aliases WHERE alias = ?", (alias,)).fetchone()
+    existing = connection.execute(
+        "SELECT player_id FROM player_aliases WHERE alias = ?", (alias,)
+    ).fetchone()
     explicit_id = record.get("player_id")
     if explicit_id is not None:
-        if not is_uuid(explicit_id) or not connection.execute("SELECT 1 FROM players WHERE id = ?", (explicit_id,)).fetchone():
+        if (
+            not is_uuid(explicit_id)
+            or not connection.execute(
+                "SELECT 1 FROM players WHERE id = ?", (explicit_id,)
+            ).fetchone()
+        ):
             raise ValueError(f"Unknown player ID: {explicit_id}")
         if existing and existing["player_id"] != explicit_id:
-            raise ValueError(f"Player alias {name!r} already belongs to a different player")
+            raise ValueError(
+                f"Player alias {name!r} already belongs to a different player"
+            )
         player_id = explicit_id
     elif existing:
         player_id = existing["player_id"]
     else:
         player_id = insert_entity(connection, "players", {"name": name})
-    connection.execute("INSERT OR IGNORE INTO player_aliases(alias, player_id) VALUES (?, ?)", (alias, player_id))
+    connection.execute(
+        "INSERT OR IGNORE INTO player_aliases(alias, player_id) VALUES (?, ?)",
+        (alias, player_id),
+    )
     if record.get("nationality"):
         nationality = normalized_name(record["nationality"])
-        current = connection.execute("SELECT nationality FROM players WHERE id = ?", (player_id,)).fetchone()[0]
+        current = connection.execute(
+            "SELECT nationality FROM players WHERE id = ?", (player_id,)
+        ).fetchone()[0]
         if current is not None and current != nationality:
             raise ValueError(f"Conflicting nationality for {name}")
-        connection.execute("UPDATE players SET nationality = ? WHERE id = ?", (nationality, player_id))
+        connection.execute(
+            "UPDATE players SET nationality = ? WHERE id = ?", (nationality, player_id)
+        )
     return player_id
 
 
@@ -291,31 +480,63 @@ def ensure_season(connection, label):
         raise ValueError("A season such as 2018/19 is required")
     if int(label[-2:]) != (int(label[:4]) + 1) % 100:
         raise ValueError(f"Season years must be consecutive: {label}")
-    existing = connection.execute("SELECT id FROM seasons WHERE label = ?", (label,)).fetchone()
-    return existing[0] if existing else insert_entity(connection, "seasons", {"label": label})
+    existing = connection.execute(
+        "SELECT id FROM seasons WHERE label = ?", (label,)
+    ).fetchone()
+    return (
+        existing[0]
+        if existing
+        else insert_entity(connection, "seasons", {"label": label})
+    )
 
 
 def ensure_edition(connection, record):
     season_id = ensure_season(connection, record.get("season"))
     name = normalized_name(record.get("competition"))
-    competition = connection.execute("SELECT * FROM competitions WHERE name = ? COLLATE NOCASE", (name,)).fetchone()
+    competition = connection.execute(
+        "SELECT * FROM competitions WHERE name = ? COLLATE NOCASE", (name,)
+    ).fetchone()
     if competition is None:
-        if type(record.get("is_preseason")) is not bool or record.get("competition_kind") not in {"league", "cup", "friendly"}:
-            raise ValueError("A new competition requires competition_kind and an explicit boolean is_preseason")
-        competition_id = insert_entity(connection, "competitions", {
-            "name": name, "kind": record["competition_kind"], "is_preseason": record["is_preseason"],
-        })
+        if type(record.get("is_preseason")) is not bool or record.get(
+            "competition_kind"
+        ) not in {"league", "cup", "friendly"}:
+            raise ValueError(
+                "A new competition requires competition_kind and an explicit boolean is_preseason"
+            )
+        competition_id = insert_entity(
+            connection,
+            "competitions",
+            {
+                "name": name,
+                "kind": record["competition_kind"],
+                "is_preseason": record["is_preseason"],
+            },
+        )
     else:
-        if "is_preseason" in record and (type(record["is_preseason"]) is not bool or
-                                          record["is_preseason"] != bool(competition["is_preseason"])):
-            raise ValueError(f"Preseason classification conflicts with the saved competition: {name}")
+        if "is_preseason" in record and (
+            type(record["is_preseason"]) is not bool
+            or record["is_preseason"] != bool(competition["is_preseason"])
+        ):
+            raise ValueError(
+                f"Preseason classification conflicts with the saved competition: {name}"
+            )
         competition_id = competition["id"]
     existing = connection.execute(
-        "SELECT id FROM competition_seasons WHERE competition_id = ? AND season_id = ?", (competition_id, season_id),
+        "SELECT id FROM competition_seasons WHERE competition_id = ? AND season_id = ?",
+        (competition_id, season_id),
     ).fetchone()
-    return existing[0] if existing else insert_entity(connection, "competition_seasons", {
-        "competition_id": competition_id, "season_id": season_id,
-    })
+    return (
+        existing[0]
+        if existing
+        else insert_entity(
+            connection,
+            "competition_seasons",
+            {
+                "competition_id": competition_id,
+                "season_id": season_id,
+            },
+        )
+    )
 
 
 def check_season_date(label, observed_on):
@@ -324,15 +545,24 @@ def check_season_date(label, observed_on):
     observed = date.fromisoformat(observed_on)
     first_year = observed.year - (observed.month < 7)
     if int(label[:4]) != first_year:
-        raise ValueError(f"Date {observed_on} is outside the July-June career season {label}")
+        raise ValueError(
+            f"Date {observed_on} is outside the July-June career season {label}"
+        )
 
 
 def checked_values(connection, table, record):
-    columns = {row["name"]: row["type"] for row in connection.execute(f"PRAGMA table_info({table})")}
+    columns = {
+        row["name"]: row["type"]
+        for row in connection.execute(f"PRAGMA table_info({table})")
+    }
     unknown = set(record) - set(columns) - CONTEXT_FIELDS
     if unknown:
         raise ValueError(f"Unrecognized {table} fields: {sorted(unknown)}")
-    values = {field: value for field, value in record.items() if field in columns and field != "id"}
+    values = {
+        field: value
+        for field, value in record.items()
+        if field in columns and field != "id"
+    }
     for field, value in values.items():
         if value is None:
             continue
@@ -356,7 +586,9 @@ def checked_values(connection, table, record):
 
 def merge_record(connection, table, values, key, replace_reviewed=False):
     where = " AND ".join(f"{field} IS ?" for field in key)
-    existing = connection.execute(f"SELECT * FROM {table} WHERE {where}", tuple(key.values())).fetchone()
+    existing = connection.execute(
+        f"SELECT * FROM {table} WHERE {where}", tuple(key.values())
+    ).fetchone()
     if existing:
         changes = {}
         for field, value in values.items():
@@ -365,12 +597,17 @@ def merge_record(connection, table, values, key, replace_reviewed=False):
             if value is None and not replace_reviewed:
                 continue
             if existing[field] is not None and not replace_reviewed:
-                raise ValueError(f"Conflict in {table} {existing['id']}, {field}: {existing[field]!r} versus {value!r}; "
-                                 "review the source and use --replace-reviewed only for an intentional correction")
+                raise ValueError(
+                    f"Conflict in {table} {existing['id']}, {field}: {existing[field]!r} versus {value!r}; "
+                    "review the source and use --replace-reviewed only for an intentional correction"
+                )
             changes[field] = value
         if changes:
             setters = ", ".join(f"{field} = ?" for field in changes)
-            connection.execute(f"UPDATE {table} SET {setters} WHERE id = ?", (*changes.values(), existing["id"]))
+            connection.execute(
+                f"UPDATE {table} SET {setters} WHERE id = ?",
+                (*changes.values(), existing["id"]),
+            )
         return existing["id"]
     return insert_entity(connection, table, values)
 
@@ -381,15 +618,22 @@ def confirmed_match(connection, record):
     if match_id is not None and source_id:
         raise ValueError("Supply either match_id or match_source_id, not both")
     if source_id:
-        matches = connection.execute("SELECT match_id FROM match_sources WHERE source_id = ?", (source_id,)).fetchall()
+        matches = connection.execute(
+            "SELECT match_id FROM match_sources WHERE source_id = ?", (source_id,)
+        ).fetchall()
         if len(matches) != 1:
-            raise ValueError("The referenced match screenshot must resolve to exactly one approved match")
+            raise ValueError(
+                "The referenced match screenshot must resolve to exactly one approved match"
+            )
         match_id = matches[0]["match_id"]
     if not is_uuid(match_id):
-        raise ValueError("A verified match_id or match_source_id is required for a player appearance")
+        raise ValueError(
+            "A verified match_id or match_source_id is required for a player appearance"
+        )
     match = connection.execute(
         "SELECT matches.*, competition_seasons.season_id FROM matches "
-        "JOIN competition_seasons ON competition_seasons.id = matches.competition_season_id WHERE matches.id = ?", (match_id,),
+        "JOIN competition_seasons ON competition_seasons.id = matches.competition_season_id WHERE matches.id = ?",
+        (match_id,),
     ).fetchone()
     if not match:
         raise ValueError(f"Unknown match: {match_id}")
@@ -403,49 +647,88 @@ def import_record(connection, source_id, record, replace_reviewed=False):
     table = RECORD_TABLES[record_type]
     values = checked_values(connection, table, record)
     if record_type == "match":
-        values.update(competition_season_id=ensure_edition(connection, record),
-                      home_club_id=ensure_club(connection, record.get("home_club")),
-                      away_club_id=ensure_club(connection, record.get("away_club")))
+        values.update(
+            competition_season_id=ensure_edition(connection, record),
+            home_club_id=ensure_club(connection, record.get("home_club")),
+            away_club_id=ensure_club(connection, record.get("away_club")),
+        )
         if not values.get("played_on"):
             raise ValueError("An approved match needs an exact played_on date")
         check_season_date(record["season"], values["played_on"])
-        key = {field: values[field] for field in ("competition_season_id", "played_on", "home_club_id", "away_club_id")}
+        key = {
+            field: values[field]
+            for field in (
+                "competition_season_id",
+                "played_on",
+                "home_club_id",
+                "away_club_id",
+            )
+        }
         linked = connection.execute(
             "SELECT matches.* FROM matches JOIN match_sources ON match_sources.match_id = matches.id WHERE source_id = ?",
             (source_id,),
         ).fetchone()
         if linked and any(linked[field] != value for field, value in key.items()):
-            raise ValueError("This source already belongs to a different fixture; identity changes need separate review")
+            raise ValueError(
+                "This source already belongs to a different fixture; identity changes need separate review"
+            )
         record_id = merge_record(connection, table, values, key, replace_reviewed)
-        connection.execute("INSERT OR IGNORE INTO match_sources(match_id, source_id) VALUES (?, ?)", (record_id, source_id))
+        connection.execute(
+            "INSERT OR IGNORE INTO match_sources(match_id, source_id) VALUES (?, ?)",
+            (record_id, source_id),
+        )
         team_stats = record.get("team_stats", {})
         if not isinstance(team_stats, dict) or set(team_stats) - {"home", "away"}:
             raise ValueError("team_stats must contain only home and away objects")
         for side, stats in team_stats.items():
             team_values = checked_values(connection, "team_matches", stats)
             team_key = {"match_id": record_id, "club_id": values[f"{side}_club_id"]}
-            merge_record(connection, "team_matches", {**team_values, **team_key}, team_key, replace_reviewed)
+            merge_record(
+                connection,
+                "team_matches",
+                {**team_values, **team_key},
+                team_key,
+                replace_reviewed,
+            )
         return record_id
     if record_type == "player_match":
         fixture = confirmed_match(connection, record)
-        values.update(match_id=fixture["id"], player_id=ensure_player(connection, record),
-                      club_id=ensure_club(connection, record.get("club")))
+        values.update(
+            match_id=fixture["id"],
+            player_id=ensure_player(connection, record),
+            club_id=ensure_club(connection, record.get("club")),
+        )
         linked = connection.execute(
             "SELECT player_matches.* FROM player_matches JOIN player_match_sources "
-            "ON player_match_sources.player_match_id = player_matches.id WHERE source_id = ?", (source_id,),
+            "ON player_match_sources.player_match_id = player_matches.id WHERE source_id = ?",
+            (source_id,),
         ).fetchone()
         key = {field: values[field] for field in ("match_id", "player_id")}
         if linked and any(linked[field] != value for field, value in key.items()):
-            raise ValueError("This performance source is already linked to a different player or match")
+            raise ValueError(
+                "This performance source is already linked to a different player or match"
+            )
         record_id = merge_record(connection, table, values, key, replace_reviewed)
-        connection.execute("INSERT OR IGNORE INTO player_match_sources(player_match_id, source_id) VALUES (?, ?)", (record_id, source_id))
+        connection.execute(
+            "INSERT OR IGNORE INTO player_match_sources(player_match_id, source_id) VALUES (?, ?)",
+            (record_id, source_id),
+        )
         if "overall" in values and (values["overall"] is not None or replace_reviewed):
-            snapshot_key = {"player_id": values["player_id"], "match_id": fixture["id"], "snapshot_kind": "in_season"}
+            snapshot_key = {
+                "player_id": values["player_id"],
+                "match_id": fixture["id"],
+                "snapshot_kind": "in_season",
+            }
             snapshot_values = {
-                **snapshot_key, "club_id": values["club_id"], "season_id": fixture["season_id"], "source_id": source_id,
-                "observed_on": fixture["played_on"], "date_precision": "day",
+                **snapshot_key,
+                "club_id": values["club_id"],
+                "season_id": fixture["season_id"],
+                "source_id": source_id,
+                "observed_on": fixture["played_on"],
+                "date_precision": "day",
                 "date_basis": f"Performance screenshot linked to approved match {fixture['id']}",
-                "overall": values["overall"], "displayed_position": values.get("displayed_position"),
+                "overall": values["overall"],
+                "displayed_position": values.get("displayed_position"),
             }
             existing = connection.execute(
                 "SELECT source_id FROM player_snapshots WHERE player_id = ? AND match_id = ? AND snapshot_kind = 'in_season'",
@@ -453,80 +736,164 @@ def import_record(connection, source_id, record, replace_reviewed=False):
             ).fetchone()
             if existing:
                 snapshot_values["source_id"] = existing["source_id"]
-            merge_record(connection, "player_snapshots", snapshot_values, snapshot_key, replace_reviewed)
+            merge_record(
+                connection,
+                "player_snapshots",
+                snapshot_values,
+                snapshot_key,
+                replace_reviewed,
+            )
         return record_id
     values["source_id"] = source_id
-    if record_type in {"player_snapshot", "player_competition_snapshot", "player_transfer"}:
+    if record_type in {
+        "player_snapshot",
+        "player_competition_snapshot",
+        "player_transfer",
+    }:
         values["player_id"] = ensure_player(connection, record)
     if record_type in {"player_snapshot", "player_competition_snapshot"}:
         values["season_id"] = ensure_season(connection, record.get("season"))
-        values["club_id"] = ensure_club(connection, record["club"]) if record.get("club") else None
+        values["club_id"] = (
+            ensure_club(connection, record["club"]) if record.get("club") else None
+        )
         check_season_date(record["season"], values.get("observed_on"))
     if record_type == "player_snapshot":
         if values.get("match_id") is not None:
             fixture = confirmed_match(connection, record)
-            if values["season_id"] != fixture["season_id"] or values.get("observed_on") != fixture["played_on"]:
-                raise ValueError("Snapshot date and season must agree with its linked match")
-        key = {field: values[field] for field in ("source_id", "player_id", "season_id")}
+            if (
+                values["season_id"] != fixture["season_id"]
+                or values.get("observed_on") != fixture["played_on"]
+            ):
+                raise ValueError(
+                    "Snapshot date and season must agree with its linked match"
+                )
+        key = {
+            field: values[field] for field in ("source_id", "player_id", "season_id")
+        }
     elif record_type == "player_competition_snapshot":
-        values["competition_season_id"] = ensure_edition(connection, record) if record.get("scope") == "competition" else None
-        key = {field: values[field] for field in ("source_id", "player_id", "season_id", "competition_season_id")}
+        values["competition_season_id"] = (
+            ensure_edition(connection, record)
+            if record.get("scope") == "competition"
+            else None
+        )
+        key = {
+            field: values[field]
+            for field in (
+                "source_id",
+                "player_id",
+                "season_id",
+                "competition_season_id",
+            )
+        }
     elif record_type == "player_transfer":
-        values.update(from_club_id=ensure_club(connection, record["from_club"]) if record.get("from_club") else None,
-                      to_club_id=ensure_club(connection, record["to_club"]) if record.get("to_club") else None)
-        key = {field: values[field] for field in ("source_id", "player_id", "transfer_type")}
+        values.update(
+            from_club_id=ensure_club(connection, record["from_club"])
+            if record.get("from_club")
+            else None,
+            to_club_id=ensure_club(connection, record["to_club"])
+            if record.get("to_club")
+            else None,
+        )
+        key = {
+            field: values[field]
+            for field in ("source_id", "player_id", "transfer_type")
+        }
     else:
         values["competition_season_id"] = ensure_edition(connection, record)
-        values["player_id"] = ensure_player(connection, record) if record.get("player") else None
-        values["club_id"] = ensure_club(connection, record["club"]) if record.get("club") else None
-        key = {field: values.get(field) for field in ("source_id", "event_type", "player_id", "club_id", "period")}
+        values["player_id"] = (
+            ensure_player(connection, record) if record.get("player") else None
+        )
+        values["club_id"] = (
+            ensure_club(connection, record["club"]) if record.get("club") else None
+        )
+        key = {
+            field: values.get(field)
+            for field in ("source_id", "event_type", "player_id", "club_id", "period")
+        }
     return merge_record(connection, table, values, key, replace_reviewed)
 
 
 def approve_review(connection, document, note, replace_reviewed=False):
-    if not isinstance(document, dict) or document.get("schema_version") not in (1, 2, SCHEMA_VERSION) or not isinstance(document.get("sources"), list):
+    if (
+        not isinstance(document, dict)
+        or document.get("schema_version") not in (1, 2, SCHEMA_VERSION)
+        or not isinstance(document.get("sources"), list)
+    ):
         raise ValueError("Unsupported or invalid review document")
     if not isinstance(note, str) or not note.strip():
         raise ValueError("A review note is required")
-    document = normalize_references(connection, document, allow_legacy=document["schema_version"] < 3)
+    document = normalize_references(
+        connection, document, allow_legacy=document["schema_version"] < 3
+    )
     counts = {"approved_sources": 0, "skipped_reviews": 0, "reviewed_records": 0}
     seen = set()
     with connection:
         for source in document["sources"]:
-            if not isinstance(source, dict) or not isinstance(source.get("source_id"), str):
+            if not isinstance(source, dict) or not isinstance(
+                source.get("source_id"), str
+            ):
                 raise ValueError("Each reviewed source needs a source_id string")
             source_id = source.get("source_id")
             if source_id in seen:
-                raise ValueError("A review document cannot include the same source twice")
+                raise ValueError(
+                    "A review document cannot include the same source twice"
+                )
             seen.add(source_id)
-            if not connection.execute("SELECT 1 FROM source_images WHERE id = ?", (source_id,)).fetchone():
-                raise ValueError(f"Source must be inventoried before review: {source_id}")
+            if not connection.execute(
+                "SELECT 1 FROM source_images WHERE id = ?", (source_id,)
+            ).fetchone():
+                raise ValueError(
+                    f"Source must be inventoried before review: {source_id}"
+                )
             if type(source.get("complete")) is not bool:
-                raise ValueError("Set complete to true or false to describe the reviewed source coverage")
+                raise ValueError(
+                    "Set complete to true or false to describe the reviewed source coverage"
+                )
             records = source.get("records")
             if not isinstance(records, list) or not records:
-                raise ValueError("A source needs at least one reviewed record; unsupported screens must remain queued")
+                raise ValueError(
+                    "A source needs at least one reviewed record; unsupported screens must remain queued"
+                )
             payload = {"records": records, "complete": source["complete"]}
-            serialized = json.dumps(payload, sort_keys=True, ensure_ascii=True, allow_nan=False)
+            serialized = json.dumps(
+                payload, sort_keys=True, ensure_ascii=True, allow_nan=False
+            )
             payload_hash = hashlib.sha256(serialized.encode()).hexdigest()
-            existing = connection.execute("SELECT 1 FROM reviews WHERE source_id = ? AND payload_hash = ?", (source_id, payload_hash)).fetchone()
+            existing = connection.execute(
+                "SELECT 1 FROM reviews WHERE source_id = ? AND payload_hash = ?",
+                (source_id, payload_hash),
+            ).fetchone()
             if existing and not replace_reviewed:
                 counts["skipped_reviews"] += 1
                 continue
-            previous_revision = connection.execute("SELECT COALESCE(MAX(revision), 0) FROM reviews WHERE source_id = ?", (source_id,)).fetchone()[0]
+            previous_revision = connection.execute(
+                "SELECT COALESCE(MAX(revision), 0) FROM reviews WHERE source_id = ?",
+                (source_id,),
+            ).fetchone()[0]
             if replace_reviewed:
-                payload_hash = hashlib.sha256(f"{serialized}:correction_after:{previous_revision}".encode()).hexdigest()
+                payload_hash = hashlib.sha256(
+                    f"{serialized}:correction_after:{previous_revision}".encode()
+                ).hexdigest()
             for record in records:
                 if not isinstance(record, dict):
                     raise ValueError("Each reviewed record must be an object")
                 import_record(connection, source_id, record, replace_reviewed)
                 counts["reviewed_records"] += 1
-            insert_entity(connection, "reviews", {
-                "source_id": source_id, "payload_json": serialized, "payload_hash": payload_hash,
-                "note": note.strip(), "revision": previous_revision + 1,
-            })
-            connection.execute("UPDATE source_images SET status = ?, error = NULL WHERE id = ?",
-                               ("imported" if source["complete"] else "needs_review", source_id))
+            insert_entity(
+                connection,
+                "reviews",
+                {
+                    "source_id": source_id,
+                    "payload_json": serialized,
+                    "payload_hash": payload_hash,
+                    "note": note.strip(),
+                    "revision": previous_revision + 1,
+                },
+            )
+            connection.execute(
+                "UPDATE source_images SET status = ?, error = NULL WHERE id = ?",
+                ("imported" if source["complete"] else "needs_review", source_id),
+            )
             counts["approved_sources"] += 1
         errors = validate_database(connection)
         if errors:
@@ -535,8 +902,13 @@ def approve_review(connection, document, note, replace_reviewed=False):
 
 
 def learn_ocr_aliases(connection):
-    fields = {"player": ("player_aliases", "player_id"),
-              **{field: ("club_aliases", "club_id") for field in ("club", "home_club", "away_club", "from_club", "to_club")}}
+    fields = {
+        "player": ("player_aliases", "player_id"),
+        **{
+            field: ("club_aliases", "club_id")
+            for field in ("club", "home_club", "away_club", "from_club", "to_club")
+        },
+    }
     aliases = {}
     for row in connection.execute(
         "SELECT extractions.candidate_json, reviews.payload_json FROM extractions JOIN reviews USING (source_id) "
@@ -544,22 +916,39 @@ def learn_ocr_aliases(connection):
     ):
         candidates = json.loads(row["candidate_json"])
         saved = json.loads(row["payload_json"])["records"]
-        if len(candidates) != 1 or len(saved) != 1 or candidates[0].get("type") != saved[0].get("type"):
+        if (
+            len(candidates) != 1
+            or len(saved) != 1
+            or candidates[0].get("type") != saved[0].get("type")
+        ):
             continue
         for field, (table, identifier) in fields.items():
             candidate_name, saved_name = candidates[0].get(field), saved[0].get(field)
-            if not isinstance(candidate_name, str) or not candidate_name.strip() or not isinstance(saved_name, str) or not saved_name.strip():
+            if (
+                not isinstance(candidate_name, str)
+                or not candidate_name.strip()
+                or not isinstance(saved_name, str)
+                or not saved_name.strip()
+            ):
                 continue
-            alias, canonical = normalized_name(candidate_name).casefold(), normalized_name(saved_name).casefold()
+            alias, canonical = (
+                normalized_name(candidate_name).casefold(),
+                normalized_name(saved_name).casefold(),
+            )
             if alias == canonical:
                 continue
-            existing = connection.execute(f"SELECT {identifier} FROM {table} WHERE alias = ?", (canonical,)).fetchone()
+            existing = connection.execute(
+                f"SELECT {identifier} FROM {table} WHERE alias = ?", (canonical,)
+            ).fetchone()
             if existing:
                 aliases.setdefault((table, identifier, alias), set()).add(existing[0])
     with connection:
         for (table, identifier, alias), matches in aliases.items():
             if len(matches) == 1:
-                connection.execute(f"INSERT OR IGNORE INTO {table}(alias, {identifier}) VALUES (?, ?)", (alias, next(iter(matches))))
+                connection.execute(
+                    f"INSERT OR IGNORE INTO {table}(alias, {identifier}) VALUES (?, ?)",
+                    (alias, next(iter(matches))),
+                )
 
 
 def normalize_goalkeeper(connection, record):
@@ -571,19 +960,34 @@ def normalize_goalkeeper(connection, record):
     if displayed is None:
         return
     fixture = confirmed_match(connection, record)
-    club = connection.execute("SELECT club_id FROM club_aliases WHERE alias = ?", (normalized_name(record.get("club")).casefold(),)).fetchone()
-    if club is None or club[0] not in {fixture["home_club_id"], fixture["away_club_id"]}:
+    club = connection.execute(
+        "SELECT club_id FROM club_aliases WHERE alias = ?",
+        (normalized_name(record.get("club")).casefold(),),
+    ).fetchone()
+    if club is None or club[0] not in {
+        fixture["home_club_id"],
+        fixture["away_club_id"],
+    }:
         raise ValueError("Goalkeeper club does not match either side of the fixture")
     opponent_side = "away" if club[0] == fixture["home_club_id"] else "home"
-    penalties, goals = fixture[f"{opponent_side}_penalties"], fixture[f"{opponent_side}_goals"]
+    penalties, goals = (
+        fixture[f"{opponent_side}_penalties"],
+        fixture[f"{opponent_side}_goals"],
+    )
     record["goals_conceded_displayed"] = displayed
     if penalties is None:
-        record["goals_conceded_basis"] = "Displayed goalkeeper count; this match had no penalty shootout."
+        record["goals_conceded_basis"] = (
+            "Displayed goalkeeper count; this match had no penalty shootout."
+        )
     elif goals is not None and displayed == goals + penalties:
         record["goals_conceded"] = goals
-        record["goals_conceded_basis"] = "Displayed goalkeeper count includes opponent shootout goals; subtract the separately recorded shootout score."
+        record["goals_conceded_basis"] = (
+            "Displayed goalkeeper count includes opponent shootout goals; subtract the separately recorded shootout score."
+        )
     elif displayed == goals:
-        record["goals_conceded_basis"] = "Displayed count agrees with the opponent's score before the shootout."
+        record["goals_conceded_basis"] = (
+            "Displayed count agrees with the opponent's score before the shootout."
+        )
     else:
         raise ValueError("Ambiguous shootout-inclusive goalkeeper count")
 
@@ -593,39 +997,76 @@ def import_pending(connection, sequences=None, refreshed_source_ids=None):
     sources = select_sources(connection)
     selected = {source["id"] for source in select_sources(connection, sequences)}
     refreshed = set(refreshed_source_ids or ())
-    pending = {source["id"] for source in sources if source["id"] in selected
-               and (source["status"] == "needs_review" or source["id"] in refreshed)}
-    documents = {source["source_id"]: source for source in make_review(connection, source_ids=pending)["sources"]}
-    counts = {"imported_sources": 0, "imported_records": 0, "unchanged_sources": 0, "skipped_sources": []}
+    pending = {
+        source["id"]
+        for source in sources
+        if source["id"] in selected
+        and (source["status"] == "needs_review" or source["id"] in refreshed)
+    }
+    documents = {
+        source["source_id"]: source
+        for source in make_review(connection, source_ids=pending)["sources"]
+    }
+    counts = {
+        "imported_sources": 0,
+        "imported_records": 0,
+        "unchanged_sources": 0,
+        "skipped_sources": [],
+    }
     current_match_id = None
     for source in sources:
         screen_type = source["screen_type"]
-        if screen_type not in {"player_performance", "goalkeeper_performance"} or source["sequence"] is None:
+        if (
+            screen_type not in {"player_performance", "goalkeeper_performance"}
+            or source["sequence"] is None
+        ):
             current_match_id = None
         document = documents.get(source["id"])
         if document is not None:
             try:
                 if not document["records"]:
-                    raise ValueError(f"No supported statistics detected on {screen_type} screen")
+                    raise ValueError(
+                        f"No supported statistics detected on {screen_type} screen"
+                    )
                 for record in document["records"]:
-                    if record.get("type") == "player_match" and not record.get("match_id") and not record.get("match_source_id"):
+                    if (
+                        record.get("type") == "player_match"
+                        and not record.get("match_id")
+                        and not record.get("match_source_id")
+                    ):
                         if current_match_id is None:
-                            raise ValueError("No unambiguous preceding match summary for this player screenshot")
+                            raise ValueError(
+                                "No unambiguous preceding match summary for this player screenshot"
+                            )
                         record["match_id"] = current_match_id
-                    if screen_type == "goalkeeper_performance" and record.get("type") == "player_match":
+                    if (
+                        screen_type == "goalkeeper_performance"
+                        and record.get("type") == "player_match"
+                    ):
                         normalize_goalkeeper(connection, record)
                 document["complete"] = True
-                result = approve_review(connection, {"schema_version": SCHEMA_VERSION, "sources": [document]},
-                                        "Automatically imported by process; OCR values were not manually verified.")
+                result = approve_review(
+                    connection,
+                    {"schema_version": SCHEMA_VERSION, "sources": [document]},
+                    "Automatically imported by process; OCR values were not manually verified.",
+                )
                 counts["imported_sources"] += result["approved_sources"]
                 counts["imported_records"] += result["reviewed_records"]
                 counts["unchanged_sources"] += result["skipped_reviews"]
             except (ValueError, sqlite3.IntegrityError) as exception:
                 with connection:
-                    connection.execute("UPDATE source_images SET error = ? WHERE id = ?", (str(exception), source["id"]))
-                counts["skipped_sources"].append({"path": source["path"], "reason": str(exception)})
+                    connection.execute(
+                        "UPDATE source_images SET error = ? WHERE id = ?",
+                        (str(exception), source["id"]),
+                    )
+                counts["skipped_sources"].append(
+                    {"path": source["path"], "reason": str(exception)}
+                )
         if screen_type == "match_facts" and source["sequence"] is not None:
-            matches = connection.execute("SELECT match_id FROM match_sources WHERE source_id = ?", (source["id"],)).fetchall()
+            matches = connection.execute(
+                "SELECT match_id FROM match_sources WHERE source_id = ?",
+                (source["id"],),
+            ).fetchall()
             current_match_id = matches[0]["match_id"] if len(matches) == 1 else None
     return counts
 
@@ -639,7 +1080,9 @@ def write_json(path, value, overwrite=True):
         return
     temporary_path = None
     try:
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, delete=False) as output:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=path.parent, delete=False
+        ) as output:
             temporary_path = Path(output.name)
             output.write(json_text(value))
         os.replace(temporary_path, path)
@@ -650,10 +1093,15 @@ def write_json(path, value, overwrite=True):
 
 def record_processing_run(connection, mode, extraction, imported):
     run = {
-        "completed_at": datetime.now(timezone.utc).isoformat(), "mode": mode,
-        "status": "partial" if extraction["errors"] or imported["skipped_sources"] else "completed",
-        "extracted_images": extraction["extracted"], "imported_sources": imported["imported_sources"],
-        "skipped_sources": len(imported["skipped_sources"]), "extraction_errors": extraction["errors"],
+        "completed_at": datetime.now(timezone.utc).isoformat(),
+        "mode": mode,
+        "status": "partial"
+        if extraction["errors"] or imported["skipped_sources"]
+        else "completed",
+        "extracted_images": extraction["extracted"],
+        "imported_sources": imported["imported_sources"],
+        "skipped_sources": len(imported["skipped_sources"]),
+        "extraction_errors": extraction["errors"],
     }
     with connection:
         connection.execute(
@@ -672,13 +1120,23 @@ def record_processing_run(connection, mode, extraction, imported):
 
 def processing_summary(connection):
     last_run = None
-    if connection.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'processing_runs'").fetchone():
-        row = connection.execute("SELECT * FROM processing_runs ORDER BY completed_at DESC, rowid DESC LIMIT 1").fetchone()
+    if connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'processing_runs'"
+    ).fetchone():
+        row = connection.execute(
+            "SELECT * FROM processing_runs ORDER BY completed_at DESC, rowid DESC LIMIT 1"
+        ).fetchone()
         last_run = dict(row) if row else None
-    extracted_at = connection.execute("SELECT MAX(extracted_at) FROM extractions").fetchone()[0]
+    extracted_at = connection.execute(
+        "SELECT MAX(extracted_at) FROM extractions"
+    ).fetchone()[0]
     if extracted_at:
         timestamp = datetime.fromisoformat(extracted_at)
-        extracted_at = timestamp.replace(tzinfo=timezone.utc).isoformat() if timestamp.tzinfo is None else timestamp.isoformat()
+        extracted_at = (
+            timestamp.replace(tzinfo=timezone.utc).isoformat()
+            if timestamp.tzinfo is None
+            else timestamp.isoformat()
+        )
     return {"last_run": last_run, "last_extracted_at": extracted_at}
 
 
@@ -686,13 +1144,20 @@ def build_dataset(connection):
     errors = validate_database(connection)
     if errors:
         raise ValueError("Cannot export an invalid database: " + "; ".join(errors))
-    data = {"schema_version": SCHEMA_VERSION, "generated_at": datetime.now(timezone.utc).isoformat(),
-            "processing": processing_summary(connection),
-            "coverage": status(connection), "match_coverage": coverage_report(connection),
-            "season_reconciliation": reconcile_totals(connection)}
+    data = {
+        "schema_version": SCHEMA_VERSION,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "processing": processing_summary(connection),
+        "coverage": status(connection),
+        "match_coverage": coverage_report(connection),
+        "season_reconciliation": reconcile_totals(connection),
+    }
     for table in EXPORT_TABLES:
         ordering = "1, 2" if table.endswith("_sources") else "id"
-        rows = [dict(row) for row in connection.execute(f"SELECT * FROM {table} ORDER BY {ordering}")]
+        rows = [
+            dict(row)
+            for row in connection.execute(f"SELECT * FROM {table} ORDER BY {ordering}")
+        ]
         for row in rows:
             for field in BOOLEAN_FIELDS & row.keys():
                 if row[field] is not None:
@@ -702,13 +1167,16 @@ def build_dataset(connection):
                 row["goals_assumed_zero"] = row["goals"] is None and goals == 0
                 row["goals"] = goals
         data[table] = rows
-    data["source_images"] = [dict(row) for row in connection.execute(
-        "SELECT source_images.id, sha256, screen_type, status, "
-        "COALESCE(MIN(CASE WHEN present = 1 THEN path END), MIN(path)) AS path, "
-        "COALESCE(MAX(present), 0) AS available FROM source_images "
-        "LEFT JOIN source_paths ON source_paths.source_id = source_images.id "
-        "GROUP BY source_images.id ORDER BY path"
-    )]
+    data["source_images"] = [
+        dict(row)
+        for row in connection.execute(
+            "SELECT source_images.id, sha256, screen_type, status, "
+            "COALESCE(MIN(CASE WHEN present = 1 THEN path END), MIN(path)) AS path, "
+            "COALESCE(MAX(present), 0) AS available FROM source_images "
+            "LEFT JOIN source_paths ON source_paths.source_id = source_images.id "
+            "GROUP BY source_images.id ORDER BY path"
+        )
+    ]
     for source in data["source_images"]:
         source["available"] = bool(source["available"])
     return data
@@ -725,8 +1193,17 @@ def dashboard_data(connection):
         if isinstance(value, list):
             return [public_value(item) for item in value]
         if isinstance(value, dict):
-            return {key: public_value(item) for key, item in value.items()
-                    if key not in {"source_id", "match_source_id", "date_basis", "goals_conceded_basis"}}
+            return {
+                key: public_value(item)
+                for key, item in value.items()
+                if key
+                not in {
+                    "source_id",
+                    "match_source_id",
+                    "date_basis",
+                    "goals_conceded_basis",
+                }
+            }
         return value
 
     return public_value(data)
@@ -735,8 +1212,12 @@ def dashboard_data(connection):
 def export_data(connection, output_path):
     data = build_dataset(connection)
     write_json(output_path, data)
-    return {"output": str(output_path), "matches": len(data["matches"]),
-            "player_matches": len(data["player_matches"]), "player_snapshots": len(data["player_snapshots"])}
+    return {
+        "output": str(output_path),
+        "matches": len(data["matches"]),
+        "player_matches": len(data["player_matches"]),
+        "player_snapshots": len(data["player_snapshots"]),
+    }
 
 
 def backup_database(connection, destination):

@@ -396,7 +396,7 @@
 		font-weight: 600;
 	}
 
-	.topbar-title>.muted {
+	.topbar-title > .muted {
 		font-size: 11px;
 		border-left: 1px solid var(--line);
 		padding-left: 14px;
@@ -432,7 +432,7 @@
 		min-height: 65px;
 	}
 
-	.filterbar>label:not(.checkbox) {
+	.filterbar > label:not(.checkbox) {
 		display: flex;
 		gap: 9px;
 		align-items: center;
@@ -464,7 +464,7 @@
 		background-size: 100% 86px;
 	}
 
-	main>* {
+	main > * {
 		animation: arrive 180ms ease-out both;
 	}
 
@@ -619,8 +619,14 @@
 	}
 
 	@keyframes ranking-enter {
-		from { opacity: 0; transform: translateY(6px); }
-		to { opacity: 1; transform: translateY(0); }
+		from {
+			opacity: 0;
+			transform: translateY(6px);
+		}
+		to {
+			opacity: 1;
+			transform: translateY(0);
+		}
 	}
 
 	.overview-lower {
@@ -630,7 +636,7 @@
 		margin-top: 27px;
 	}
 
-	.overview-lower>section {
+	.overview-lower > section {
 		min-width: 0;
 	}
 
@@ -778,14 +784,14 @@
 		border-left: 0;
 	}
 
-	.kpi>strong {
+	.kpi > strong {
 		font-family: "Barlow Condensed", sans-serif;
 		font-size: 40px;
 		line-height: 1;
 		font-weight: 500;
 	}
 
-	.kpi>.muted {
+	.kpi > .muted {
 		font-size: 10px;
 		min-height: 15px;
 	}
@@ -1073,11 +1079,11 @@
 		font-weight: 500;
 	}
 
-	.fixture-link>span {
+	.fixture-link > span {
 		flex: 1;
 	}
 
-	.fixture-link>.versus {
+	.fixture-link > .versus {
 		color: #a0aa97;
 		font-size: 10px;
 		flex: 0;
@@ -1093,7 +1099,7 @@
 		font-size: 10px;
 	}
 
-	.pagination>div {
+	.pagination > div {
 		display: flex;
 		align-items: center;
 		gap: 9px;
@@ -1158,7 +1164,7 @@
 		padding: 31px 16px;
 	}
 
-	.team-name>span {
+	.team-name > span {
 		color: #8a9480;
 		text-transform: uppercase;
 		font-size: 10px;
@@ -1179,7 +1185,7 @@
 		text-align: center;
 	}
 
-	.match-score>strong {
+	.match-score > strong {
 		display: block;
 		font-family: "Barlow Condensed", sans-serif;
 		font-size: 53px;
@@ -1187,11 +1193,11 @@
 		font-weight: 500;
 	}
 
-	.match-score>strong>span {
+	.match-score > strong > span {
 		color: #a6b19c;
 	}
 
-	.match-score>small {
+	.match-score > small {
 		display: block;
 		color: #6f7a65;
 		font-size: 10px;
@@ -1206,7 +1212,7 @@
 		padding: 15px 0;
 	}
 
-	.match-meta>span {
+	.match-meta > span {
 		display: flex;
 		align-items: center;
 		gap: 7px;
@@ -1222,7 +1228,7 @@
 		border-bottom: 1px solid var(--line);
 	}
 
-	.comparison-stat>div:first-child {
+	.comparison-stat > div:first-child {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
@@ -1234,7 +1240,7 @@
 		font-variant-numeric: tabular-nums;
 	}
 
-	.comparison-stat>div>span {
+	.comparison-stat > div > span {
 		font-size: 10px;
 		color: #7a8570;
 	}
@@ -1246,13 +1252,13 @@
 		margin-top: 10px;
 	}
 
-	.comparison-bars>span {
+	.comparison-bars > span {
 		width: 50%;
 		background: #e6eae0;
 		display: flex;
 	}
 
-	.comparison-bars>span:first-child {
+	.comparison-bars > span:first-child {
 		justify-content: flex-end;
 	}
 
@@ -1262,7 +1268,7 @@
 		display: block;
 	}
 
-	.comparison-bars>span+span i {
+	.comparison-bars > span + span i {
 		background: #a8bf9e;
 	}
 
@@ -1424,7 +1430,7 @@
 		margin-bottom: 23px;
 	}
 
-	.competition-symbol>svg+svg {
+	.competition-symbol > svg + svg {
 		color: #9aab8c;
 	}
 
@@ -1590,7 +1596,7 @@
 		gap: 45px;
 	}
 
-	.stats-list>div {
+	.stats-list > div {
 		display: flex;
 		align-items: start;
 		justify-content: space-between;
@@ -1611,7 +1617,7 @@
 		overflow-wrap: anywhere;
 	}
 
-	.stats-list.large>div {
+	.stats-list.large > div {
 		padding: 11px 0;
 		font-size: 12px;
 	}
@@ -1623,7 +1629,7 @@
 		border-bottom: 1px solid var(--line);
 	}
 
-	.warning-record>svg {
+	.warning-record > svg {
 		color: #ae8845;
 	}
 
@@ -1657,7 +1663,7 @@
 		font-size: 12px;
 	}
 
-	.dataset-selector>span {
+	.dataset-selector > span {
 		font-size: 10px;
 	}
 
@@ -1810,7 +1816,7 @@
 		gap: 0 28px;
 	}
 
-	.record-details>div {
+	.record-details > div {
 		padding: 11px 0;
 		border-bottom: 1px solid #e8eee0;
 		min-width: 0;
@@ -1990,7 +1996,7 @@
 			gap: 12px;
 		}
 
-		.filterbar>label:not(.checkbox) {
+		.filterbar > label:not(.checkbox) {
 			gap: 7px;
 		}
 
@@ -2007,7 +2013,7 @@
 			gap: 13px;
 		}
 
-		.event-record>.button {
+		.event-record > .button {
 			grid-column: 3;
 			justify-self: start;
 		}
@@ -2042,7 +2048,7 @@
 			display: none;
 		}
 
-		.filterbar>.icon-button {
+		.filterbar > .icon-button {
 			margin-left: auto;
 		}
 
@@ -2117,7 +2123,7 @@
 			gap: 8px;
 		}
 
-		.topbar-title>.muted {
+		.topbar-title > .muted {
 			display: none;
 		}
 
@@ -2130,18 +2136,18 @@
 			gap: 10px 17px;
 		}
 
-		.filterbar>label:not(.checkbox) {
+		.filterbar > label:not(.checkbox) {
 			display: flex;
 			flex-direction: column;
 			align-items: flex-start;
 			gap: 4px;
 		}
 
-		.filterbar>label:first-child {
+		.filterbar > label:first-child {
 			flex: 1;
 		}
 
-		.filterbar>label:nth-child(2) {
+		.filterbar > label:nth-child(2) {
 			flex: 1.5;
 		}
 
@@ -2157,7 +2163,7 @@
 			margin-left: 0;
 		}
 
-		.filterbar>.icon-button {
+		.filterbar > .icon-button {
 			margin: 0;
 		}
 
@@ -2195,11 +2201,11 @@
 			border-top: 1px solid var(--line);
 		}
 
-		.kpi>strong {
+		.kpi > strong {
 			font-size: 35px;
 		}
 
-		.kpi>.muted {
+		.kpi > .muted {
 			font-size: 10px;
 		}
 
@@ -2255,7 +2261,7 @@
 			grid-template-columns: 1fr;
 		}
 
-		.record-details>div {
+		.record-details > div {
 			padding: 10px 0;
 		}
 
@@ -2295,7 +2301,7 @@
 			grid-column: 1 / -1;
 		}
 
-		.event-record>.button {
+		.event-record > .button {
 			grid-column: 2;
 		}
 
@@ -2327,11 +2333,11 @@
 			gap: 7px;
 		}
 
-		.match-score>strong {
+		.match-score > strong {
 			font-size: 40px;
 		}
 
-		.match-score>small {
+		.match-score > small {
 			font-size: 9px;
 		}
 
@@ -2343,7 +2349,7 @@
 			gap: 10px;
 		}
 
-		.match-meta>.button {
+		.match-meta > .button {
 			width: 100%;
 		}
 
@@ -2461,7 +2467,8 @@
 		z-index: 1;
 		top: 34px;
 		height: 28px;
-		transform: perspective(2000px) rotateZ(300deg) rotateX(44deg) rotateY(39deg) scale(1.4);
+		transform: perspective(2000px) rotateZ(300deg) rotateX(44deg)
+			rotateY(39deg) scale(1.4);
 	}
 
 	.vite {
@@ -2469,7 +2476,8 @@
 		top: 107px;
 		height: 26px;
 		width: auto;
-		transform: perspective(2000px) rotateZ(300deg) rotateX(40deg) rotateY(39deg) scale(0.8);
+		transform: perspective(2000px) rotateZ(300deg) rotateX(40deg)
+			rotateY(39deg) scale(0.8);
 	}
 }
 
@@ -2492,7 +2500,7 @@
 	border-top: 1px solid var(--border);
 	text-align: left;
 
-	&>div {
+	& > div {
 		flex: 1 1 0;
 		padding: 32px;
 
