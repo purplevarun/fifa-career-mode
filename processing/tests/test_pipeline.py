@@ -13,7 +13,7 @@ from unittest.mock import Mock, patch
 
 from PIL import Image
 
-from processing import EXTRACTOR_VERSION
+from processing import EXTRACTOR_VERSION, SCHEMA_VERSION
 from processing.database import (
     connect,
     coverage_report,
@@ -102,7 +102,7 @@ class DatabaseTests(DatabaseTestCase):
         self.connection = connect(self.root / "career.sqlite")
         self.addCleanup(self.connection.close)
         self.assertEqual(
-            self.connection.execute("PRAGMA user_version").fetchone()[0], 3
+            self.connection.execute("PRAGMA user_version").fetchone()[0], SCHEMA_VERSION
         )
         self.assertEqual(
             self.connection.execute("SELECT id FROM player_matches").fetchone()[0],
@@ -1550,6 +1550,293 @@ class AutomaticImportTests(DatabaseTestCase):
             ],
             0,
         )
+
+    def test_annual_awards_include_our_players_and_outside_winners_without_league_links(
+        self,
+    ):
+        self.extract(
+            ("match_facts", [self.match]),
+            ("player_performance", [self.player]),
+            (
+                "dashboard_award",
+                [
+                    parse_news_event(
+                        "Harry Kewell wins Player of the Year", observed_on="2018-12-01"
+                    )
+                ],
+            ),
+            (
+                "dashboard_award",
+                [
+                    parse_news_event(
+                        "Player of the Year Announced Lionel Messi",
+                        observed_on="2019-12-01",
+                    )
+                ],
+            ),
+        )
+
+        result = import_pending(self.connection)
+
+        self.assertEqual(result["skipped_sources"], [])
+        self.assertEqual(result["imported_sources"], 4)
+        awards = self.connection.execute(
+            "SELECT event.*, player.name FROM competition_events event JOIN players player ON player.id = event.player_id ORDER BY period"
+        ).fetchall()
+        self.assertEqual(
+            [(award["name"], award["period"]) for award in awards],
+            [("Harry Kewell", "2018"), ("Lionel Messi", "2019")],
+        )
+        for award in awards:
+            self.assertTrue(is_uuid(award["id"]))
+            self.assertTrue(is_uuid(award["player_id"]))
+            self.assertIsNone(award["competition_season_id"])
+            self.assertIsNone(award["club_id"])
+            self.assertIsNone(award["announced_on"])
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM players").fetchone()[0], 2
+        )
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM player_matches").fetchone()[
+                0
+            ],
+            1,
+        )
+        self.assertEqual(
+            self.connection.execute(
+                "SELECT COUNT(*) FROM competition_seasons"
+            ).fetchone()[0],
+            1,
+        )
+        self.assertEqual(len(dashboard_data(self.connection)["competition_events"]), 2)
+        self.assertEqual(validate_database(self.connection), [])
+
+    def test_duplicate_annual_awards_keep_one_event_and_both_source_reviews(self):
+        self.extract(
+            (
+                "news",
+                [
+                    parse_news_event(
+                        "Lionel Messi wins Player of the Year",
+                        announced_on="2019-12-12",
+                    )
+                ],
+            ),
+            (
+                "dashboard_award",
+                [
+                    parse_news_event(
+                        "Player of the Year Announced Lionel Messi",
+                        observed_on="2019-12-01",
+                    )
+                ],
+            ),
+        )
+
+        result = import_pending(self.connection)
+
+        self.assertEqual(result["skipped_sources"], [])
+        self.assertEqual(result["imported_sources"], 2)
+        self.assertEqual(
+            self.connection.execute(
+                "SELECT COUNT(*) FROM competition_events"
+            ).fetchone()[0],
+            1,
+        )
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM reviews").fetchone()[0], 2
+        )
+        event = dict(
+            self.connection.execute("SELECT * FROM competition_events").fetchone()
+        )
+        self.assertEqual(event["announced_on"], "2019-12-12")
+        self.assertEqual(import_pending(self.connection)["imported_sources"], 0)
+        self.assertEqual(
+            dict(
+                self.connection.execute("SELECT * FROM competition_events").fetchone()
+            ),
+            event,
+        )
+
+    def test_conflicting_annual_winners_do_not_replace_the_saved_winner(self):
+        self.extract(
+            (
+                "dashboard_award",
+                [
+                    parse_news_event(
+                        "Lionel Messi wins Player of the Year", observed_on="2019-12-01"
+                    )
+                ],
+            ),
+            (
+                "dashboard_award",
+                [
+                    parse_news_event(
+                        "Cristiano Ronaldo wins Player of the Year",
+                        observed_on="2019-12-01",
+                    )
+                ],
+            ),
+        )
+
+        result = import_pending(self.connection)
+
+        self.assertEqual(result["imported_sources"], 1)
+        self.assertEqual(len(result["skipped_sources"]), 1)
+        self.assertIn("Conflict", result["skipped_sources"][0]["reason"])
+        self.assertEqual(
+            self.connection.execute("SELECT name FROM players").fetchone()[0],
+            "Lionel Messi",
+        )
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM players").fetchone()[0], 1
+        )
+
+    def test_annual_awards_never_borrow_a_year_from_neighboring_fixtures(self):
+        self.extract(
+            ("match_facts", [self.match]),
+            (
+                "dashboard_award",
+                [parse_news_event("Player of the Year Announced Lionel Messi")],
+            ),
+        )
+
+        result = import_pending(self.connection)
+
+        self.assertEqual(result["imported_sources"], 1)
+        self.assertEqual(len(result["skipped_sources"]), 1)
+        self.assertIn("calendar award year", result["skipped_sources"][0]["reason"])
+        self.assertEqual(
+            self.connection.execute(
+                "SELECT COUNT(*) FROM competition_events"
+            ).fetchone()[0],
+            0,
+        )
+
+    def test_annual_awards_require_a_winner_and_year_without_a_competition_season(self):
+        award = parse_news_event(
+            "Lionel Messi wins Player of the Year", observed_on="2019-12-01"
+        )
+        self.extract(
+            *(
+                ("dashboard_award", [{**award, **invalid}])
+                for invalid in (
+                    {"player": None},
+                    {"period": "2019/20"},
+                    {"period": "December"},
+                    {"competition": "EFL League One"},
+                    {"season": "2019/20"},
+                )
+            )
+        )
+
+        result = import_pending(self.connection)
+
+        self.assertEqual(result["imported_sources"], 0)
+        self.assertEqual(len(result["skipped_sources"]), 5)
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM players").fetchone()[0], 0
+        )
+        self.assertEqual(
+            self.connection.execute(
+                "SELECT COUNT(*) FROM competition_events"
+            ).fetchone()[0],
+            0,
+        )
+
+    def test_championship_captures_merge_but_seasons_and_competitions_stay_distinct(
+        self,
+    ):
+        self.extract(
+            (
+                "news",
+                [
+                    parse_news_event(
+                        "Notts County Crowned EFL League Two Champions",
+                        announced_on="2019-05-04",
+                    )
+                ],
+            ),
+            (
+                "dashboard_award",
+                [
+                    parse_news_event(
+                        "Notts County Crowned EFL League Two Champions",
+                        observed_on="2019-05-01",
+                    )
+                ],
+            ),
+            (
+                "dashboard_award",
+                [
+                    parse_news_event(
+                        "Notts County Crowned EFL League Two Champions",
+                        observed_on="2020-05-01",
+                    )
+                ],
+            ),
+            (
+                "dashboard_award",
+                [
+                    parse_news_event(
+                        "Ipswich Crowned EFL League One Champions",
+                        observed_on="2019-05-01",
+                    )
+                ],
+            ),
+        )
+
+        result = import_pending(self.connection)
+
+        self.assertEqual(result["skipped_sources"], [])
+        self.assertEqual(result["imported_sources"], 4)
+        self.assertEqual(
+            self.connection.execute(
+                "SELECT COUNT(*) FROM competition_events"
+            ).fetchone()[0],
+            3,
+        )
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM reviews").fetchone()[0], 4
+        )
+        dated = self.connection.execute(
+            "SELECT * FROM competition_events WHERE announced_on IS NOT NULL"
+        ).fetchone()
+        self.assertEqual(dated["announced_on"], "2019-05-04")
+        self.assertEqual(dated["period"], "2018/19")
+        self.assertEqual(validate_database(self.connection), [])
+
+    def test_conflicting_champions_do_not_replace_the_saved_club(self):
+        self.extract(
+            (
+                "dashboard_award",
+                [
+                    parse_news_event(
+                        "Notts County Crowned EFL League Two Champions",
+                        observed_on="2019-05-01",
+                    )
+                ],
+            ),
+            (
+                "dashboard_award",
+                [
+                    parse_news_event(
+                        "MK Dons Crowned EFL League Two Champions",
+                        observed_on="2019-05-01",
+                    )
+                ],
+            ),
+        )
+
+        result = import_pending(self.connection)
+
+        self.assertEqual(result["imported_sources"], 1)
+        self.assertEqual(len(result["skipped_sources"]), 1)
+        self.assertIn("Conflict", result["skipped_sources"][0]["reason"])
+        winner = self.connection.execute(
+            "SELECT clubs.name FROM competition_events JOIN clubs ON clubs.id = club_id"
+        ).fetchone()[0]
+        self.assertEqual(winner, "Notts County")
 
     def test_monthly_award_uses_player_league_in_award_month_not_nearby_cup(self):
         self.extract(

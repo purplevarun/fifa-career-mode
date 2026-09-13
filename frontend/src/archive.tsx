@@ -41,6 +41,7 @@ export function CareerRecords() {
 	const [eventType, setEventType] = useState("all");
 	const events = model.data.competition_events
 		.filter((event) => {
+			if (event.event_type === "player_of_the_year") return true;
 			const edition = model.editions.get(
 				String(event.competition_season_id),
 			);
@@ -62,6 +63,35 @@ export function CareerRecords() {
 	const monthly = events.filter(
 		(event) => event.event_type === "player_of_the_month",
 	);
+	const annual = events
+		.filter((event) => event.event_type === "player_of_the_year")
+		.map((event) => ({
+			id: event.id,
+			year: String(event.period ?? "Unknown year"),
+			player_id: String(event.player_id),
+			name:
+				model.players.get(String(event.player_id))?.name ??
+				"Unknown player",
+		}));
+	const champions = events
+		.filter((event) => event.event_type === "champion")
+		.map((event) => {
+			const edition = model.editions.get(
+				String(event.competition_season_id),
+			);
+			return {
+				id: event.id,
+				season:
+					model.seasons.get(edition?.season_id ?? "")?.label ??
+					"Unknown season",
+				competition:
+					model.competitions.get(edition?.competition_id ?? "")
+						?.name ?? "Unknown competition",
+				club:
+					model.clubs.get(String(event.club_id))?.name ??
+					"Unknown club",
+			};
+		});
 	const awardCounts = new Map<
 		string,
 		{
@@ -212,6 +242,57 @@ export function CareerRecords() {
 				</div>
 			) : (
 				<>
+					<SectionHeading title="Player of the Year">
+						<Pill>{annual.length} awards</Pill>
+					</SectionHeading>
+					{annual.length === 0 ? (
+						<Empty title="No Player of the Year awards recorded" />
+					) : (
+						<DataTable
+							rows={annual}
+							rowKey={(row) => row.id}
+							searchLabel="Search yearly award winners"
+							searchText={(row) => `${row.year} ${row.name}`}
+							defaultSort={{ key: "year", desc: true }}
+							exportName="player-of-the-year.json"
+							columns={[
+								{ key: "year", title: "Year" },
+								{
+									key: "name",
+									title: "Winner",
+									render: (row) => (
+										<CareerLink
+											to={`/players/${row.player_id}`}
+										>
+											{row.name}
+										</CareerLink>
+									),
+								},
+							]}
+						/>
+					)}
+					<SectionHeading title="Champions">
+						<Pill>{champions.length} titles</Pill>
+					</SectionHeading>
+					{champions.length === 0 ? (
+						<Empty title="No championships in this selection" />
+					) : (
+						<DataTable
+							rows={champions}
+							rowKey={(row) => row.id}
+							searchLabel="Search champions"
+							searchText={(row) =>
+								`${row.season} ${row.competition} ${row.club}`
+							}
+							defaultSort={{ key: "season", desc: true }}
+							exportName="champions.json"
+							columns={[
+								{ key: "season", title: "Season" },
+								{ key: "competition", title: "Competition" },
+								{ key: "club", title: "Winner" },
+							]}
+						/>
+					)}
 					{monthly.length > 0 && (
 						<>
 							<SectionHeading title="Player of the Month">
@@ -304,11 +385,14 @@ export function CareerRecords() {
 								<Trophy size={24} className="event-icon" />
 								<div>
 									<div className="eyebrow">
-										{referenceLabel(
-											model,
-											"competition_season_id",
-											event.competition_season_id,
-										)}
+										{event.event_type ===
+										"player_of_the_year"
+											? "Annual award"
+											: referenceLabel(
+													model,
+													"competition_season_id",
+													event.competition_season_id,
+												)}
 									</div>
 									<h2>{label(String(event.event_type))}</h2>
 									<p>{String(event.description)}</p>

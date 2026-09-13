@@ -115,11 +115,15 @@ def classify(text):
     if "congratulations" in normalized and "winner" in normalized:
         return "competition_result"
     if "standings" in normalized:
-        if re.search(
-            r"(?:grabs|wins)(?:"
-            + "|".join(month.lower() for month in MONTHS)
-            + r")playerofthemonth",
-            normalized,
+        if (
+            re.search(
+                r"(?:grabs|wins)(?:"
+                + "|".join(month.lower() for month in MONTHS)
+                + r")playerofthemonth",
+                normalized,
+            )
+            or "playeroftheyear" in normalized
+            or re.search(r"crowned.+champions?", normalized)
         ):
             return "dashboard_award"
         return "dashboard"
@@ -171,7 +175,7 @@ def parse_months(text):
     return int(matched.group(1)) * (12 if matched.group(2).lower() == "year" else 1)
 
 
-def detected_fields(tokens, regions):
+def detected_fields(tokens, regions, single_line=False):
     fields = {}
     for field, bounds in regions.items():
         normalized = [
@@ -192,7 +196,7 @@ def detected_fields(tokens, regions):
         ]
         selected.sort(
             key=lambda token: (
-                min(point[1] for point in token["box"]),
+                0 if single_line else min(point[1] for point in token["box"]),
                 min(point[0] for point in token["box"]),
             )
         )
@@ -333,6 +337,17 @@ def parse_news_event(title, body="", announced_on=None, observed_on=None):
     award = re.fullmatch(
         r"(player|goalkeeper)ofthe(competition|tournament)(?:announced)?", normalized
     )
+    annual = re.fullmatch(
+        r"Player\s*of\s*the\s*Year\s*Announced(?:\s*[:\-]?\s*(.+?))?[.!]?",
+        title,
+        re.IGNORECASE,
+    )
+    annual_winner = re.fullmatch(
+        r"(.+?)\s*(?:wins|named)\s*(?:the\s*)?(?:(20\d{2})\s*)?"
+        r"Player\s*of\s*the\s*Year(?:\s*Award)?[.!]?",
+        title,
+        re.IGNORECASE,
+    )
     if monthly:
         event_type = "player_of_the_month"
         player = monthly.group(1).strip()
@@ -348,6 +363,24 @@ def parse_news_event(title, body="", announced_on=None, observed_on=None):
         employer = re.search(r"performance\s*for\s*(.+?)\s*earned", body, re.IGNORECASE)
         if employer:
             club = club_name(employer.group(1))
+    elif annual or annual_winner:
+        player = annual.group(1) if annual else annual_winner.group(1)
+        if not player:
+            named = re.match(
+                r"(?:(.+?)['\u2019]s\s+)?(.+?)\s+has\s+been\s+named\s+"
+                r"(?:the\s+)?Player\s+of\s+the\s+Year\b",
+                body,
+                re.IGNORECASE,
+            )
+            player = named.group(2) if named else None
+            club = club_name(named.group(1)) if named and named.group(1) else None
+        if not player or not player.strip(" .!:-"):
+            return None
+        player = player.strip(" .!:-")
+        event_type = "player_of_the_year"
+        competition = None
+        explicit_year = annual_winner.group(2) if annual_winner else None
+        period = explicit_year or (str(event_date.year) if event_date else None)
     elif champion:
         event_type = "champion"
         club = club_name(champion.group(1))
@@ -375,6 +408,8 @@ def parse_news_event(title, body="", announced_on=None, observed_on=None):
         return None
     season_year = event_date.year - (event_date.month < 7) if event_date else None
     season = f"{season_year}/{str(season_year + 1)[-2:]}" if season_year else None
+    if event_type == "player_of_the_year":
+        season = None
     return {
         "type": "competition_event",
         "event_type": event_type,
@@ -782,7 +817,10 @@ class ScreenshotExtractor:
                 "No named award winner or championship found; predictions and shortlists are not awards."
             )
         for record in records:
-            if not record["competition"] or not record["season"]:
+            if record["event_type"] == "player_of_the_year":
+                if not record["period"]:
+                    issues.append("The Player of the Year award year is not stated.")
+            elif not record["competition"] or not record["season"]:
                 issues.append(
                     f"Competition or season is not stated in the award text: {record['description']}"
                 )
@@ -830,8 +868,10 @@ class ScreenshotExtractor:
             {
                 "calendar": (590, 208, 676, 236),
                 "fixture_date": (87, 248, 373, 270),
-                "headline.detected": (775, 439, 1136, 463),
+                "headline.detected": (775, 438, 1136, 463),
+                "headline.raised.detected": (700, 388, 1282, 420),
             },
+            single_line=True,
         )
         enlarged = image.resize(
             (image.width * 2, image.height * 2), Image.Resampling.LANCZOS
@@ -850,12 +890,28 @@ class ScreenshotExtractor:
             record = parse_news_event(
                 fields["headline.detected"]["raw_text"], observed_on=observed_on
             )
+        if record is None:
+            record = parse_news_event(
+                fields["headline.raised.detected"]["raw_text"], observed_on=observed_on
+            )
+        if record is None:
+            fields.update(
+                self.recognize(enlarged, {"headline.raised": (700, 388, 1282, 420)})
+            )
+            record = parse_news_event(
+                fields["headline.raised"]["raw_text"], observed_on=observed_on
+            )
+        if record and observed_on:
+            record["context_basis"] = (
+                f"Dashboard calendar {observed_on[:7]} supplies observation context; "
+                "no exact announcement date inferred."
+            )
         return (
             ([record] if record else []),
             fields,
             [
                 "Dashboard month/year is observation context, not the award announcement date.",
-                "The award's competition and club require recorded player participation; upcoming fixtures and the training player are not award evidence.",
+                "Only the news headline identifies winners; upcoming fixtures, standings and the training player are not award evidence.",
             ],
         )
 

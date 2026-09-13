@@ -483,6 +483,127 @@ describe("local stats pages", () => {
 			expect(html).not.toContain("/evidence/");
 		},
 	);
+	it("shows yearly winners from any team independently of league filters", () => {
+		const outsidePlayer = {
+			id: "00000000-0000-4000-8000-000000000130",
+			name: "Lionel Messi",
+			nationality: null,
+		};
+		const model = createModel({
+			...fixture,
+			schema_version: 4,
+			players: [...fixture.players, outsidePlayer],
+			competition_events: [
+				{
+					id: "00000000-0000-4000-8000-000000000131",
+					event_type: "player_of_the_year",
+					player_id: fixture.players[0].id,
+					competition_season_id: null,
+					period: "2018",
+					announced_on: null,
+					description: "2018 annual winner",
+				},
+				{
+					id: "00000000-0000-4000-8000-000000000132",
+					event_type: "player_of_the_year",
+					player_id: outsidePlayer.id,
+					competition_season_id: null,
+					period: "2019",
+					announced_on: null,
+					description: "2019 annual winner",
+				},
+			],
+		});
+		const filters = {
+			...defaultFilters,
+			season: fixture.seasons[0].id,
+			competition: fixture.competitions[0].id,
+			preseason: false,
+		};
+		const html = renderToStaticMarkup(
+			<MemoryRouter initialEntries={["/career?tab=events"]}>
+				<CareerContext
+					value={{ model, filters, matches: model.matches }}
+				>
+					<CareerRecords />
+				</CareerContext>
+			</MemoryRouter>,
+		);
+		expect(html).toContain("Player of the Year");
+		expect(html).toContain("Search yearly award winners");
+		expect(html).toContain("Lionel Messi");
+		expect(html).toContain(fixture.players[0].name);
+		expect(html).toContain(">2019</td>");
+		expect(html).toContain(">2018</td>");
+		expect(html.indexOf(">2019</td>")).toBeLessThan(
+			html.indexOf(">2018</td>"),
+		);
+		expect(html).toContain("Annual award");
+		expect(html).not.toContain("Unknown competition");
+	});
+	it("shows championship winners by season and competition including other clubs", () => {
+		const model = createModel({
+			...fixture,
+			schema_version: 4,
+			competition_events: [
+				{
+					id: "00000000-0000-4000-8000-000000000133",
+					event_type: "champion",
+					club_id: fixture.clubs[1].id,
+					competition_season_id: fixture.competition_seasons[0].id,
+					period: "2018/19",
+					description: "League title",
+				},
+				{
+					id: "00000000-0000-4000-8000-000000000134",
+					event_type: "champion",
+					club_id: fixture.clubs[0].id,
+					competition_season_id: fixture.competition_seasons[1].id,
+					period: "2018/19",
+					description: "Cup title",
+				},
+			],
+		});
+		const filters = {
+			...defaultFilters,
+			season: fixture.seasons[0].id,
+			competition: fixture.competitions[0].id,
+		};
+		const html = renderToStaticMarkup(
+			<MemoryRouter initialEntries={["/career?tab=events"]}>
+				<CareerContext
+					value={{ model, filters, matches: model.matches }}
+				>
+					<CareerRecords />
+				</CareerContext>
+			</MemoryRouter>,
+		);
+		expect(html).toContain("Champions");
+		expect(html).toContain("Search champions");
+		expect(html).toContain(fixture.clubs[1].name);
+		expect(html).toContain(fixture.seasons[0].label);
+		expect(html).toContain(fixture.competitions[0].name);
+		expect(html).toContain("League title");
+		expect(html).not.toContain("Cup title");
+	});
+	it("keeps yearly award and championship sections visible before awards are recorded", () => {
+		const model = createModel({ ...fixture, competition_events: [] });
+		const html = renderToStaticMarkup(
+			<MemoryRouter initialEntries={["/career?tab=events"]}>
+				<CareerContext
+					value={{
+						model,
+						filters: defaultFilters,
+						matches: model.matches,
+					}}
+				>
+					<CareerRecords />
+				</CareerContext>
+			</MemoryRouter>,
+		);
+		expect(html).toContain("No Player of the Year awards recorded");
+		expect(html).toContain("No championships in this selection");
+	});
 	it("groups monthly honours by player and season and shows the award month", () => {
 		const data = {
 			...fixture,

@@ -5,9 +5,10 @@ import unittest
 from contextlib import closing
 from pathlib import Path
 
+from processing import SCHEMA_VERSION
 from processing.identifiers import is_uuid, new_id, resolve_id
-from processing.migrations import migrate_to_uuids
-from processing.database import connect, inventory, validate_database
+from processing.migrations import migrate_annual_awards, migrate_to_uuids
+from processing.database import connect, insert_entity, inventory, validate_database
 from processing.pipeline import approve_review
 from PIL import Image
 
@@ -204,6 +205,118 @@ class IdentifierTests(unittest.TestCase):
                 len(list((Path(directory) / "backups").glob("*.sqlite"))), 1
             )
             connection.close()
+
+    def test_annual_award_migration_preserves_existing_records_and_uuids(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "career.sqlite"
+            with closing(connect(path)) as connection:
+                connection.executescript("""
+                    DROP TABLE competition_events;
+                    CREATE TABLE competition_events (
+                        id TEXT PRIMARY KEY NOT NULL CHECK (length(id) = 36),
+                        competition_season_id TEXT NOT NULL REFERENCES competition_seasons(id),
+                        source_id TEXT NOT NULL REFERENCES source_images(id),
+                        event_type TEXT NOT NULL,
+                        player_id TEXT REFERENCES players(id),
+                        club_id TEXT REFERENCES clubs(id),
+                        announced_on TEXT,
+                        period TEXT,
+                        description TEXT NOT NULL
+                    );
+                    PRAGMA user_version = 3;
+                """)
+                source_id = insert_entity(
+                    connection, "source_images", {"sha256": "a" * 64, "byte_size": 10}
+                )
+                player_id = insert_entity(
+                    connection, "players", {"name": "Lionel Messi"}
+                )
+                approve_review(
+                    connection,
+                    {
+                        "schema_version": 3,
+                        "sources": [
+                            {
+                                "source_id": source_id,
+                                "complete": True,
+                                "records": [
+                                    {
+                                        "type": "competition_event",
+                                        "event_type": "champion",
+                                        "club": "Notts County",
+                                        "competition": "EFL League Two",
+                                        "season": "2018/19",
+                                        "period": "2018/19",
+                                        "announced_on": "2019-05-04",
+                                        "description": "Notts County crowned champions.",
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                    "Existing reviewed championship",
+                )
+                tables = (
+                    "source_images",
+                    "players",
+                    "clubs",
+                    "seasons",
+                    "competition_seasons",
+                    "competition_events",
+                    "reviews",
+                )
+                before = {
+                    table: [
+                        tuple(row)
+                        for row in connection.execute(f"SELECT * FROM {table}")
+                    ]
+                    for table in tables
+                }
+            with closing(connect(path)) as connection:
+                self.assertEqual(
+                    connection.execute("PRAGMA user_version").fetchone()[0],
+                    SCHEMA_VERSION,
+                )
+                for table in tables:
+                    self.assertEqual(
+                        [
+                            tuple(row)
+                            for row in connection.execute(f"SELECT * FROM {table}")
+                        ],
+                        before[table],
+                    )
+                insert_entity(
+                    connection,
+                    "competition_events",
+                    {
+                        "source_id": source_id,
+                        "event_type": "player_of_the_year",
+                        "player_id": player_id,
+                        "period": "2019",
+                        "description": "Lionel Messi wins Player of the Year.",
+                    },
+                )
+                self.assertEqual(validate_database(connection), [])
+
+    def test_annual_award_migration_failure_keeps_the_original_table(self):
+        with closing(sqlite3.connect(":memory:")) as connection:
+            connection.executescript("""
+                CREATE TABLE competition_events (id TEXT);
+                INSERT INTO competition_events VALUES ('existing-record');
+                PRAGMA user_version = 3;
+            """)
+            with self.assertRaises(sqlite3.OperationalError):
+                migrate_annual_awards(connection)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 3)
+            self.assertEqual(
+                connection.execute("SELECT * FROM competition_events").fetchone()[0],
+                "existing-record",
+            )
+            self.assertIsNone(
+                connection.execute(
+                    "SELECT name FROM sqlite_master WHERE name = 'competition_events_new'"
+                ).fetchone()
+            )
 
 
 if __name__ == "__main__":

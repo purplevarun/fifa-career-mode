@@ -244,14 +244,19 @@ CREATE TABLE player_transfers (
 
 CREATE TABLE competition_events (
     id TEXT PRIMARY KEY NOT NULL CHECK (length(id) = 36),
-    competition_season_id TEXT NOT NULL REFERENCES competition_seasons(id),
+    competition_season_id TEXT REFERENCES competition_seasons(id),
     source_id TEXT NOT NULL REFERENCES source_images(id),
     event_type TEXT NOT NULL,
     player_id TEXT REFERENCES players(id),
     club_id TEXT REFERENCES clubs(id),
     announced_on TEXT,
     period TEXT,
-    description TEXT NOT NULL
+    description TEXT NOT NULL,
+    CHECK (
+        (event_type = 'player_of_the_year' AND competition_season_id IS NULL
+            AND player_id IS NOT NULL AND period IS NOT NULL AND period GLOB '20[0-9][0-9]')
+        OR (event_type != 'player_of_the_year' AND competition_season_id IS NOT NULL)
+    )
 );
 
 CREATE TABLE legacy_ids (

@@ -808,24 +808,55 @@ def import_record(connection, source_id, record, replace_reviewed=False):
             for field in ("source_id", "player_id", "transfer_type")
         }
     else:
-        values["competition_season_id"] = ensure_edition(connection, record)
+        event_type = record.get("event_type")
+        if event_type == "player_of_the_year":
+            if any(
+                record.get(field)
+                for field in ("competition", "competition_season_id", "season")
+            ):
+                raise ValueError(
+                    "Player of the Year is a calendar-year award, not a competition-season event"
+                )
+            if not isinstance(record.get("period"), str) or not re.fullmatch(
+                r"20\d{2}", record["period"]
+            ):
+                raise ValueError(
+                    "Player of the Year requires a calendar award year such as 2019"
+                )
+            if not record.get("player"):
+                raise ValueError("Player of the Year requires a named winner")
+            values["competition_season_id"] = None
+        else:
+            values["competition_season_id"] = ensure_edition(connection, record)
         values["player_id"] = (
             ensure_player(connection, record) if record.get("player") else None
         )
         values["club_id"] = (
             ensure_club(connection, record["club"]) if record.get("club") else None
         )
-        key = {
-            field: values.get(field)
-            for field in ("source_id", "event_type", "player_id", "club_id", "period")
-        }
+        if event_type == "champion" and values["club_id"] is None:
+            raise ValueError("A championship requires a named winning club")
+        key_fields = ("source_id", "event_type", "player_id", "club_id", "period")
+        if event_type == "player_of_the_year":
+            key_fields = ("event_type", "period")
+        elif event_type == "champion":
+            key_fields = ("event_type", "competition_season_id")
+        key = {field: values.get(field) for field in key_fields}
+        if event_type in {"player_of_the_year", "champion"}:
+            where = " AND ".join(f"{field} IS ?" for field in key)
+            existing = connection.execute(
+                f"SELECT * FROM competition_events WHERE {where}", tuple(key.values())
+            ).fetchone()
+            if existing and existing["source_id"] != source_id:
+                values["source_id"] = existing["source_id"]
+                values["description"] = existing["description"]
     return merge_record(connection, table, values, key, replace_reviewed)
 
 
 def approve_review(connection, document, note, replace_reviewed=False):
     if (
         not isinstance(document, dict)
-        or document.get("schema_version") not in (1, 2, SCHEMA_VERSION)
+        or document.get("schema_version") not in (1, 2, 3, SCHEMA_VERSION)
         or not isinstance(document.get("sources"), list)
     ):
         raise ValueError("Unsupported or invalid review document")
@@ -1258,11 +1289,16 @@ def import_pending(connection, sequences=None, refreshed_source_ids=None):
                     )
                 resolve_candidate_players(connection, document, strict=True)
                 for record in document["records"]:
-                    if record.get("type") in {
-                        "player_snapshot",
-                        "player_competition_snapshot",
-                        "competition_event",
-                    } and not record.get("season"):
+                    if (
+                        record.get("type")
+                        in {
+                            "player_snapshot",
+                            "player_competition_snapshot",
+                            "competition_event",
+                        }
+                        and record.get("event_type") != "player_of_the_year"
+                        and not record.get("season")
+                    ):
                         context = season_contexts.get(source["id"])
                         if context:
                             record["season"] = context[0]

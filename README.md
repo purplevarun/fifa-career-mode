@@ -105,6 +105,13 @@ separately from captured cumulative season snapshots. **Career records >
 Honours & events** shows Player of the Month counts by player and season, with
 the award month kept separate from its announcement date.
 
+The same page has searchable, exportable **Player of the Year** and **Champions**
+tables. Yearly awards list calendar years and named winners, including players
+outside Notts County, and remain visible independently of league/season filters.
+Champions are listed by competition and season and follow those filters, without
+restricting winners to Notts County. Both sections are visible before any awards
+have been recorded.
+
 ## Process Screenshots
 
 Put new images into `raw_screenshots/`, then run:
@@ -156,7 +163,7 @@ Supported screens include:
 
 - Match/team stats, player performances, selected-player profiles and season totals.
 - Completed transfers and loans, weekly wages, contract lengths and loan lengths.
-- Player of the Month (news articles and dashboard banners), player/goalkeeper competition awards, Golden Boot headlines and competition winners.
+- Player of the Month, Player of the Year, player/goalkeeper competition awards, Golden Boot headlines and competition winners, including championship dashboard banners.
 
 Offers still in negotiation and award shortlists are not treated as completed
 signings or wins. Missing years, selling clubs, fees and competition context stay
@@ -171,6 +178,20 @@ the named player's recorded league appearances in the award month. A Golden Boot
 headline can use a same-screen championship and individual award only when their
 competition, season, and announcement date agree. Inferred context is retained in
 the import history and does not come from a saved-answer file.
+
+Player of the Year is a calendar-year event, not a league-season award. Its year
+comes from explicit award text or the article/dashboard date context; its named
+winner can be recorded without any team membership, appearance, or competition.
+The standard news strip and raised headline text are supported. Names come only
+from the news text, never a portrait, training panel, standings, or fixture.
+Dashboard calendars do not supply an exact announcement date. Missing award
+years and conflicting winners remain unresolved rather than being guessed.
+
+Multiple captures of the same annual award or competition-season championship
+share one event. Each screenshot keeps its own OCR and review evidence; repeat
+captures do not inflate honour counts. Schema 4 permits competition-independent
+annual awards while retaining existing UUIDs and reviewed records when upgrading
+a schema-3 database. The dashboard accepts both schema versions.
 
 Player and goalkeeper screenshots are linked to the preceding match summary in
 numeric screenshot order. An unrelated or unrecognized screen breaks that

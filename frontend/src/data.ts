@@ -179,7 +179,7 @@ export function createModel(input: unknown): Model {
 		"competition_events",
 	] as const;
 	if (
-		data.schema_version !== 3 ||
+		![3, 4].includes(data.schema_version) ||
 		tables.some((table) => !Array.isArray(data[table]))
 	)
 		throw new Error("The local stats use an unsupported schema-version.");

@@ -282,6 +282,26 @@ describe("career data calculations", () => {
 			),
 		).toBe(true);
 	});
+	it.each([3, 4])(
+		"accepts schema %s without requiring an edition for annual awards",
+		(version) => {
+			const annual = {
+				id: "00000000-0000-4000-8000-000000000099",
+				event_type: "player_of_the_year",
+				player_id: data.players[0].id,
+				competition_season_id: null,
+				period: "2019",
+				description: "Annual winner",
+			};
+			const updated = createModel({
+				...data,
+				schema_version: version,
+				competition_events: [annual],
+			});
+			expect(updated.data.competition_events).toEqual([annual]);
+			expect(updated.matches).toHaveLength(model.matches.length);
+		},
+	);
 	it("rejects unsupported exports and missing relationships", () => {
 		expect(() => createModel({ ...data, schema_version: 2 })).toThrow(
 			/schema-version/,

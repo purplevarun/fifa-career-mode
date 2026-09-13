@@ -4,6 +4,7 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
+from . import SCHEMA_VERSION
 from .identifiers import new_id, normalize_references
 
 
@@ -154,7 +155,7 @@ def migrate_to_uuids(connection, database_path, schema):
             raise ValueError(f"UUID migration created invalid references: {problems}")
         if connection.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
             raise ValueError("UUID migration failed SQLite integrity validation")
-        connection.execute("PRAGMA user_version = 3")
+        connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         connection.commit()
     except Exception:
         connection.rollback()
@@ -162,3 +163,43 @@ def migrate_to_uuids(connection, database_path, schema):
     finally:
         connection.execute("PRAGMA foreign_keys = ON")
     return backup_path
+
+
+def migrate_annual_awards(connection):
+    version = connection.execute("PRAGMA user_version").fetchone()[0]
+    if version != 3:
+        raise ValueError(f"Annual award migration requires schema 3, found {version}")
+    try:
+        connection.executescript("""
+            BEGIN IMMEDIATE;
+            CREATE TABLE competition_events_new (
+                id TEXT PRIMARY KEY NOT NULL CHECK (length(id) = 36),
+                competition_season_id TEXT REFERENCES competition_seasons(id),
+                source_id TEXT NOT NULL REFERENCES source_images(id),
+                event_type TEXT NOT NULL,
+                player_id TEXT REFERENCES players(id),
+                club_id TEXT REFERENCES clubs(id),
+                announced_on TEXT,
+                period TEXT,
+                description TEXT NOT NULL,
+                CHECK (
+                    (event_type = 'player_of_the_year' AND competition_season_id IS NULL
+                        AND player_id IS NOT NULL AND period IS NOT NULL AND period GLOB '20[0-9][0-9]')
+                    OR (event_type != 'player_of_the_year' AND competition_season_id IS NOT NULL)
+                )
+            );
+            INSERT INTO competition_events_new SELECT * FROM competition_events;
+            DROP TABLE competition_events;
+            ALTER TABLE competition_events_new RENAME TO competition_events;
+        """)
+        if connection.execute("PRAGMA foreign_key_check").fetchall():
+            raise ValueError("Annual award migration found invalid references")
+        if connection.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+            raise ValueError(
+                "Annual award migration failed SQLite integrity validation"
+            )
+        connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise

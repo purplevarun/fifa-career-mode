@@ -8,7 +8,7 @@ from PIL import Image
 
 from . import SCHEMA_VERSION
 from .identifiers import is_uuid, new_id
-from .migrations import migrate_to_uuids
+from .migrations import migrate_annual_awards, migrate_to_uuids
 
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"}
@@ -46,7 +46,7 @@ def connect(database_path):
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON")
     version = connection.execute("PRAGMA user_version").fetchone()[0]
-    if version not in (0, 1, 2, SCHEMA_VERSION):
+    if version not in (0, 1, 2, 3, SCHEMA_VERSION):
         connection.close()
         raise ValueError(f"Unsupported database schema version: {version}")
     if version == 0:
@@ -75,6 +75,12 @@ def connect(database_path):
                 database_path,
                 Path(__file__).with_name("schema.sql").read_text(encoding="utf-8"),
             )
+        except Exception:
+            connection.close()
+            raise
+    if version == 3:
+        try:
+            migrate_annual_awards(connection)
         except Exception:
             connection.close()
             raise

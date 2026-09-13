@@ -132,9 +132,72 @@ class ParsingTests(unittest.TestCase):
             "King nominated for Player of the Month",
             "Exeter City Fans Expect Promotion",
             "Player of the Competition Announced",
+            "Player of the Year Announced",
+            "Lionel Messi nominated for Player of the Year",
+            "Lionel Messi likely Player of the Year",
             "Team of the Competition Announced",
         ):
             self.assertIsNone(parse_news_event(title))
+
+    def test_dashboard_champions_and_annual_awards_are_supported(self):
+        for headline in (
+            "Notts County Crowned EFL League Two Champions",
+            "Player of the Year Announced Lionel Messi",
+            "Erling Haaland wins Player of the Year Award",
+        ):
+            with self.subTest(headline=headline):
+                self.assertEqual(classify(f"STANDINGS {headline}"), "dashboard_award")
+        champion = parse_news_event(
+            "Notts County Crowned EFL League Two Champions", observed_on="2019-05-01"
+        )
+        self.assertEqual(champion["event_type"], "champion")
+        self.assertEqual(champion["club"], "Notts County")
+        self.assertEqual(champion["competition"], "EFL League Two")
+        self.assertEqual(champion["season"], "2018/19")
+        self.assertIsNone(champion["announced_on"])
+
+    def test_annual_awards_use_named_winners_and_calendar_years(self):
+        for title, body, expected_player, expected_year in (
+            ("Player of the Year Announced Lionel Messi", "", "Lionel Messi", "2019"),
+            (
+                "Erling Haaland wins Player of the Year Award",
+                "",
+                "Erling Haaland",
+                "2019",
+            ),
+            ("Lionel Messi wins 2018 Player of the Year", "", "Lionel Messi", "2018"),
+            (
+                "Player of the Year Announced",
+                "Lionel Messi has been named Player of the Year.",
+                "Lionel Messi",
+                "2019",
+            ),
+        ):
+            with self.subTest(title=title, body=body):
+                record = parse_news_event(title, body, observed_on="2019-12-01")
+                self.assertEqual(record["event_type"], "player_of_the_year")
+                self.assertEqual(record["player"], expected_player)
+                self.assertEqual(record["period"], expected_year)
+                for field in ("competition", "club", "season", "announced_on"):
+                    self.assertIsNone(record[field])
+
+    def test_annual_award_without_a_year_keeps_it_unknown(self):
+        record = parse_news_event("Player of the Year Announced Lionel Messi")
+        self.assertIsNone(record["period"])
+        self.assertIsNone(record["season"])
+
+    def test_annual_award_article_uses_an_explicit_club_without_merging_it_into_the_name(
+        self,
+    ):
+        record = parse_news_event(
+            "Player of the Year Announced",
+            "FC Barcelona's Lionel Messi has been named the Player of the Year.",
+            announced_on="2019-12-12",
+        )
+        self.assertEqual(record["player"], "Lionel Messi")
+        self.assertEqual(record["club"], "FC Barcelona")
+        self.assertEqual(record["period"], "2019")
+        self.assertIsNone(record["competition"])
 
 
 class NumericRecognitionTests(unittest.TestCase):
@@ -419,6 +482,101 @@ class NonMatchExtractionTests(unittest.TestCase):
             any("Competition or season is not stated" in issue for issue in issues)
         )
 
+    def dashboard_award(self, headlines, calendar="DEC 2019", fixture_date=""):
+        self.extractor.recognize = Mock(
+            side_effect=lambda image, regions: {
+                field: {"raw_text": "", "confidence": 0.0} for field in regions
+            }
+        )
+        tokens = ocr_tokens(
+            [
+                (calendar, 600, 210, 670, 230),
+                (fixture_date, 90, 249, 370, 268),
+                ("EFL League One", 420, 360, 610, 385),
+                ("Notts County", 430, 460, 620, 480),
+                ("Tosin Adarabioyo", 1000, 535, 1160, 575),
+                *headlines,
+            ]
+        )
+        return self.extractor.extract_dashboard_award(
+            Image.new("RGB", (1366, 768), "white"), tokens
+        )
+
+    def test_dashboard_annual_winner_uses_only_the_news_tile(self):
+        records, _fields, _issues = self.dashboard_award(
+            [
+                ("Player of the Year Announced", 782, 444, 917, 457),
+                ("Lionel Messi", 925, 441, 1028, 457),
+            ]
+        )
+        self.assertEqual(len(records), 1)
+        record = records[0]
+        self.assertEqual(record["event_type"], "player_of_the_year")
+        self.assertEqual(record["player"], "Lionel Messi")
+        self.assertEqual(record["period"], "2019")
+        self.assertIn("2019-12", record["context_basis"])
+        for field in ("club", "competition", "season", "announced_on"):
+            self.assertIsNone(record[field])
+
+    def test_dashboard_champion_can_use_a_raised_headline(self):
+        records, _fields, _issues = self.dashboard_award(
+            [("Notts County Crowned EFL League Two Champions", 709, 393, 1280, 413)],
+            calendar="MAY 2019",
+        )
+        self.assertEqual(len(records), 1)
+        record = records[0]
+        self.assertEqual(record["event_type"], "champion")
+        self.assertEqual(record["club"], "Notts County")
+        self.assertEqual(record["competition"], "EFL League Two")
+        self.assertEqual(record["season"], "2018/19")
+        self.assertIsNone(record["player"])
+        self.assertIsNone(record["announced_on"])
+
+    def test_unnamed_annual_award_does_not_use_the_training_player(self):
+        records, _fields, _issues = self.dashboard_award(
+            [("Player of the Year Announced", 782, 444, 917, 457)]
+        )
+        self.assertEqual(records, [])
+
+    def test_raised_headline_crop_recovers_a_missing_detected_line(self):
+        self.extractor.recognize = Mock(
+            side_effect=[
+                {"headline": {"raw_text": "", "confidence": 0.0}},
+                {
+                    "headline.raised": {
+                        "raw_text": "Notts County Crowned EFL League Two Champions",
+                        "confidence": 0.99,
+                    }
+                },
+            ]
+        )
+        records, fields, _issues = self.extractor.extract_dashboard_award(
+            Image.new("RGB", (1366, 768), "white"),
+            ocr_tokens([("MAY 2019", 600, 210, 670, 230)]),
+        )
+        self.assertEqual(records[0]["club"], "Notts County")
+        self.assertEqual(records[0]["season"], "2018/19")
+        self.assertIn("headline.raised", fields)
+
+    def test_conflicting_or_missing_dashboard_dates_do_not_invent_award_years(self):
+        for calendar, fixture in (("DEC 2019", "January 2020"), ("", "")):
+            with self.subTest(calendar=calendar, fixture=fixture):
+                records, _fields, _issues = self.dashboard_award(
+                    [
+                        (
+                            "Player of the Year Announced Lionel Messi",
+                            782,
+                            442,
+                            1030,
+                            459,
+                        )
+                    ],
+                    calendar=calendar,
+                    fixture_date=fixture,
+                )
+                self.assertIsNone(records[0]["period"])
+                self.assertIsNone(records[0]["announced_on"])
+
 
 @unittest.skipUnless(
     os.environ.get("CAREER_OCR_TESTS") == "1",
@@ -692,6 +850,42 @@ class ScreenshotTests(unittest.TestCase):
                 self.assertIsNone(record["announced_on"])
                 self.assertIsNone(record["competition"])
                 self.assertIsNone(record["club"])
+
+    def test_annotated_championship_and_annual_award_banners(self):
+        for sequence, expected in (
+            (
+                908,
+                {
+                    "event_type": "champion",
+                    "club": "Notts County",
+                    "competition": "EFL League Two",
+                    "season": "2018/19",
+                    "period": "2018/19",
+                    "player": None,
+                },
+            ),
+            (
+                1395,
+                {
+                    "event_type": "player_of_the_year",
+                    "player": "Lionel Messi",
+                    "period": "2019",
+                    "competition": None,
+                    "club": None,
+                    "season": None,
+                },
+            ),
+        ):
+            with self.subTest(sequence=sequence):
+                extraction = self.extractor.extract(
+                    self.root / "raw_screenshots" / f"{sequence}.png"
+                )
+                self.assertEqual(extraction["screen_type"], "dashboard_award")
+                self.assertEqual(len(extraction["records"]), 1)
+                record = extraction["records"][0]
+                for field, value in expected.items():
+                    self.assertEqual(record[field], value, field)
+                self.assertIsNone(record["announced_on"])
 
 
 if __name__ == "__main__":
