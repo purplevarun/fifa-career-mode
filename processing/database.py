@@ -179,7 +179,8 @@ def coverage_report(connection, club_name="Notts County"):
         }
     players_by_match = {}
     for row in connection.execute(
-        "SELECT player_matches.* FROM player_matches JOIN clubs ON clubs.id = club_id "
+        "SELECT player_matches.*, players.name AS player_name FROM player_matches JOIN clubs ON clubs.id = club_id "
+        "JOIN players ON players.id = player_id "
         "WHERE clubs.name = ? COLLATE NOCASE ORDER BY match_id, player_id", (club_name,),
     ):
         players_by_match.setdefault(row["match_id"], []).append(dict(row))
@@ -207,13 +208,17 @@ def coverage_report(connection, club_name="Notts County"):
         players = players_by_match.get(match_id, [])
         teams = teams_by_match.get(match_id, [])
         missing_core = {}
+        missing_player_details = []
         for player in players:
             fields = ["overall", "rating", "displayed_position", "assists"]
             fields += (["goals_conceded", "shots_caught", "shots_parried"] if player["displayed_position"] == "GK"
                        else ["goals", "shots_on_target", "shots_off_target"])
-            for field in fields:
-                if player[field] is None:
-                    missing_core[field] = missing_core.get(field, 0) + 1
+            missing_fields = [field for field in fields if player[field] is None]
+            for field in missing_fields:
+                missing_core[field] = missing_core.get(field, 0) + 1
+            if missing_fields:
+                names = ", ".join(field.replace("_", " ") for field in missing_fields)
+                missing_player_details.append(f"{player['player_name']} ({names})")
         team_complete = len(teams) == 2 and all(team[field] is not None for team in teams for field in team_fields)
         outfield = [player for player in players if player["displayed_position"] not in (None, "GK")]
         credited_goals = None
@@ -222,23 +227,52 @@ def coverage_report(connection, club_name="Notts County"):
         goals_for = fixture["home_goals"] if fixture["is_home"] else fixture["away_goals"]
         goals_against = fixture["away_goals"] if fixture["is_home"] else fixture["home_goals"]
         difference = goals_for - credited_goals if goals_for is not None and credited_goals is not None else None
-        if difference:
+        assumed_own_goals = max(difference, 0) if difference is not None else None
+        warning_context = {
+            "match_id": match_id, "played_on": fixture["played_on"], "season": fixture["season"],
+            "competition": fixture["competition"], "home_club": fixture["home_club"], "away_club": fixture["away_club"],
+        }
+        if difference is not None and difference < 0:
             warnings.append({
-                "code": "player_goal_difference", "match_id": match_id, "played_on": fixture["played_on"],
-                "home_club": fixture["home_club"], "away_club": fixture["away_club"],
+                **warning_context, "code": "player_goal_difference", "title": "Player goals exceed team score",
                 "team_goals": goals_for, "credited_player_goals": credited_goals, "difference": difference,
-                "detail": "Keep the verified team score and player credits; no own-goal attribution is established.",
+            "detail": "Credited player goals exceed the team score; an opponent own goal cannot explain this difference.",
             })
         if len(players) < 11:
-            warnings.append({"code": "fewer_than_11_player_records", "match_id": match_id, "count": len(players)})
+            warnings.append({
+                **warning_context, "code": "fewer_than_11_player_records", "title": "Fewer than 11 player records", "count": len(players),
+                "detail": f"{len(players)} player appearances recorded for {club_name}; at least 11 are expected for a complete match.",
+            })
         if missing_core:
-            warnings.append({"code": "missing_player_core_fields", "match_id": match_id, "fields": missing_core})
+            warnings.append({
+                **warning_context, "code": "missing_player_core_fields", "title": "Missing player statistics", "fields": missing_core,
+                "detail": "Missing player stats: " + "; ".join(missing_player_details) + ".",
+            })
         if not team_complete:
-            warnings.append({"code": "incomplete_team_statistics", "match_id": match_id})
+            teams_by_club = {team["club_id"]: team for team in teams}
+            missing_team_details = []
+            for side in ("home", "away"):
+                team = teams_by_club.get(fixture[f"{side}_club_id"])
+                missing_fields = [field for field in team_fields if team is None or team[field] is None]
+                if missing_fields:
+                    names = ", ".join(field.replace("_pct", " percentage").replace("_", " ") for field in missing_fields)
+                    missing_team_details.append(f"{fixture[f'{side}_club']} ({names})")
+            warnings.append({
+                **warning_context, "code": "incomplete_team_statistics", "title": "Incomplete team statistics",
+                "detail": "Missing team stats: " + "; ".join(missing_team_details) + ".",
+            })
         if team_complete and abs(sum(team["possession_pct"] for team in teams) - 100) > 0.01:
-            warnings.append({"code": "possession_total_mismatch", "match_id": match_id})
+            possession_total = sum(team["possession_pct"] for team in teams)
+            warnings.append({
+                **warning_context, "code": "possession_total_mismatch", "title": "Possession does not total 100%",
+                "detail": f"The two clubs' recorded possession adds up to {possession_total:g}% instead of 100%.",
+            })
         if goals_for is None or goals_against is None:
-            warnings.append({"code": "missing_match_score", "match_id": match_id})
+            missing_scores = [fixture[f"{side}_club"] for side in ("home", "away") if fixture[f"{side}_goals"] is None]
+            warnings.append({
+                **warning_context, "code": "missing_match_score", "title": "Incomplete match score",
+                "detail": "Missing goal total for " + " and ".join(missing_scores) + ".",
+            })
         results.append({
             "match_id": match_id, "played_on": fixture["played_on"], "season": fixture["season"],
             "competition": fixture["competition"], "is_preseason": bool(fixture["is_preseason"]),
@@ -246,6 +280,7 @@ def coverage_report(connection, club_name="Notts County"):
             "player_records": len(players), "player_core_fields_complete": bool(players) and not missing_core,
             "team_rows": len(teams), "team_fields_complete": team_complete,
             "team_goals": goals_for, "credited_player_goals": credited_goals, "goal_difference": difference,
+            "assumed_own_goals": assumed_own_goals,
         })
         edition_key = (fixture["competition"], fixture["season"])
         edition = competitions.setdefault(edition_key, {
@@ -271,6 +306,7 @@ def coverage_report(connection, club_name="Notts County"):
             "maximum_player_records_per_match": max((result["player_records"] for result in results), default=0),
             "matches_with_two_complete_team_rows": sum(result["team_fields_complete"] for result in results),
             "matches_with_complete_player_core_fields": sum(result["player_core_fields_complete"] for result in results),
+            "assumed_own_goals": sum(result["assumed_own_goals"] or 0 for result in results),
             "warning_count": len(warnings),
         },
         "player_field_availability": {
@@ -280,6 +316,7 @@ def coverage_report(connection, club_name="Notts County"):
         "competitions": list(competitions.values()), "matches": results, "warnings": warnings,
         "limitations": [
             "Player count is coverage evidence, not proof of a starting XI or known minutes played.",
+            "Positive differences between the team score and recorded player goals are assumed opponent own goals, not verified scorer attributions.",
             "Null fields may be unreviewed, absent or not applicable; they are never implied zeroes.",
             "Results use scores before penalty shootouts; league points exclude any unrecorded deductions.",
             "Opponent appearances are not included in the selected club's totals.",

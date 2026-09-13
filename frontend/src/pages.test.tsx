@@ -69,6 +69,147 @@ describe("local stats pages", () => {
 		expect(html).not.toContain("nine comparisons unavailable");
 	});
 
+	it.each([
+		{
+			code: "missing_player_core_fields",
+			title: "Missing player statistics",
+			detail: "Missing player stats: Test Goalkeeper (assists).",
+		},
+		{
+			code: "incomplete_team_statistics",
+			title: "Incomplete team statistics",
+			detail: "Missing team stats: Notts County (corners); Portsmouth (corners).",
+		},
+		{
+			code: "fewer_than_11_player_records",
+			title: "Fewer than 11 player records",
+			detail: "Only 8 player appearances are recorded.",
+		},
+		{
+			code: "possession_total_mismatch",
+			title: "Possession does not total 100%",
+			detail: "Recorded possession adds up to 95% instead of 100%.",
+		},
+		{
+			code: "missing_match_score",
+			title: "Incomplete match score",
+			detail: "Missing goal total for Portsmouth.",
+		},
+		{
+			code: "player_goal_difference",
+			title: "Player goals exceed team score",
+			detail: "Credited player goals exceed the team score.",
+			team_goals: 1,
+			credited_player_goals: 2,
+		},
+	])("explains $title on verification and match pages", (warning) => {
+		const matchId = fixture.matches[1].id;
+		const warningModel = createModel({
+			...fixture,
+			match_coverage: {
+				...fixture.match_coverage,
+				warnings: [{ ...warning, match_id: matchId }],
+			},
+		});
+		for (const view of [
+			{
+				entry: "/audit?tab=warnings",
+				path: "/audit",
+				element: <Audit />,
+			},
+			{
+				entry: `/matches/${matchId}`,
+				path: "/matches/:id",
+				element: <MatchDetail />,
+			},
+		]) {
+			const html = renderToStaticMarkup(
+				<MemoryRouter initialEntries={[view.entry]}>
+					<CareerContext
+						value={{
+							model: warningModel,
+							filters: defaultFilters,
+							matches: warningModel.matches,
+						}}
+					>
+						<Routes>
+							<Route path={view.path} element={view.element} />
+						</Routes>
+					</CareerContext>
+				</MemoryRouter>,
+			);
+			expect(html).toContain(warning.title);
+			expect(html).toContain(warning.detail);
+			expect(html).toContain("Portsmouth");
+			expect(html).toContain("Notts County");
+			expect(html).toContain("8 August 2018");
+			expect(html).not.toContain("undefined");
+			if (warning.code !== "player_goal_difference") {
+				expect(html).not.toContain("Credited player goals:");
+			}
+		}
+	});
+
+	it("labels assumed opponent own goals without creating an open warning", () => {
+		const match = fixture.matches[1];
+		const assumed = createModel({
+			...fixture,
+			match_coverage: {
+				...fixture.match_coverage,
+				summary: {
+					...fixture.match_coverage.summary,
+					assumed_own_goals: 1,
+					warning_count: 0,
+				},
+				matches: [
+					{
+						match_id: match.id,
+						home_club: "Portsmouth",
+						away_club: "Notts County",
+						team_goals: 1,
+						credited_player_goals: 0,
+						assumed_own_goals: 1,
+					},
+				],
+				warnings: [],
+			},
+		});
+		for (const view of [
+			{
+				entry: "/audit?tab=warnings",
+				path: "/audit",
+				element: <Audit />,
+			},
+			{
+				entry: `/matches/${match.id}`,
+				path: "/matches/:id",
+				element: <MatchDetail />,
+			},
+		]) {
+			const html = renderToStaticMarkup(
+				<MemoryRouter initialEntries={[view.entry]}>
+					<CareerContext
+						value={{
+							model: assumed,
+							filters: defaultFilters,
+							matches: assumed.matches,
+						}}
+					>
+						<Routes>
+							<Route path={view.path} element={view.element} />
+						</Routes>
+					</CareerContext>
+				</MemoryRouter>,
+			);
+			expect(html).toContain("Assumed opponent own goals: 1");
+			expect(html).toContain("Team goals: 1. Credited player goals: 0.");
+			expect(html).toContain("Individual goal credits unchanged.");
+			expect(html).not.toContain("undefined");
+			expect(html).not.toContain('class="warning-record"');
+			expect(html).not.toContain('class="notice warning"');
+		}
+	});
+
 	it.each(["passes_completed", "key_passes", "interceptions"])(
 		"ranks recorded %s within selected fixtures and preserves unknowns",
 		(statistic) => {

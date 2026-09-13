@@ -367,8 +367,13 @@ function MetricPair({
 }
 export function Audit() {
 	const { model } = useCareer();
-	const [tab, setTab] = useState("reconciliation"),
-		[selected, setSelected] = useState<Row | null>(null);
+	const [parameters, setParameters] = useSearchParams();
+	const requestedTab = parameters.get("tab");
+	const tab =
+		requestedTab === "coverage" || requestedTab === "warnings"
+			? requestedTab
+			: "reconciliation";
+	const [selected, setSelected] = useState<Row | null>(null);
 	const [season, setSeason] = useState("all"),
 		[scope, setScope] = useState("all");
 	const comparisons = model.data.season_reconciliation.comparisons.filter(
@@ -378,6 +383,10 @@ export function Audit() {
 	);
 	const warnings = model.data.match_coverage.warnings;
 	const coverage = model.data.match_coverage.summary;
+	const ownGoalAssumptions =
+		model.data.match_coverage.matches?.filter(
+			(row) => Number(row.assumed_own_goals) > 0,
+		) ?? [];
 	const appearances = selectPerformances(model, model.matches);
 	const passing = performanceMetric(appearances, "passes_completed");
 	const keyPasses = performanceMetric(appearances, "key_passes");
@@ -478,7 +487,7 @@ export function Audit() {
 					{
 						label: "Open warnings",
 						value: warnings.length,
-						detail: "Goal attribution",
+						detail: "Missing data & consistency",
 					},
 				]}
 			/>
@@ -497,7 +506,13 @@ export function Audit() {
 						aria-selected={tab === value}
 						className={tab === value ? "active" : ""}
 						key={value}
-						onClick={() => setTab(value)}
+						onClick={() =>
+							setParameters((current) => {
+								const next = new URLSearchParams(current);
+								next.set("tab", value);
+								return next;
+							})
+						}
 					>
 						{title}
 					</button>
@@ -633,43 +648,116 @@ export function Audit() {
 			)}
 			{tab === "warnings" && (
 				<div>
-					{warnings.length ? (
-						warnings.map((warning, index) => (
-							<section className="warning-record" key={index}>
-								<TriangleAlert size={22} />
-								<div>
-									<div className="eyebrow">
-										{String(warning.played_on)}
-									</div>
-									<h2>
-										{String(warning.home_club)} /{" "}
-										{String(warning.away_club)}
-									</h2>
-									<p>
-										Team goals:{" "}
-										<strong>
-											{String(warning.team_goals)}
-										</strong>
-										. Credited player goals:{" "}
-										<strong>
-											{String(
-												warning.credited_player_goals,
-											)}
-										</strong>
-										.
-									</p>
-									<p className="muted">
-										{String(warning.detail)}
-									</p>
-									<CareerLink
-										to={`/matches/${warning.match_id}`}
-										className="button secondary"
-									>
-										Open match <ArrowRight size={15} />
+					{ownGoalAssumptions.map((row) => (
+						<div
+							className="notice positive"
+							key={String(row.match_id)}
+						>
+							<Check size={18} />
+							<div>
+								<strong>
+									Assumed opponent own goals:{" "}
+									{display(row.assumed_own_goals)}
+								</strong>
+								<p>
+									<CareerLink to={`/matches/${row.match_id}`}>
+										{display(row.home_club)} /{" "}
+										{display(row.away_club)}
 									</CareerLink>
-								</div>
-							</section>
-						))
+								</p>
+								<p>
+									Team goals: {display(row.team_goals)}.
+									Credited player goals:{" "}
+									{display(row.credited_player_goals)}.
+									Individual goal credits unchanged.
+								</p>
+							</div>
+						</div>
+					))}
+					{warnings.length ? (
+						warnings.map((warning, index) => {
+							const match = model.matchById.get(
+								String(warning.match_id ?? ""),
+							);
+							const playedOn =
+								typeof warning.played_on === "string"
+									? warning.played_on
+									: (match?.played_on ?? null);
+							return (
+								<section className="warning-record" key={index}>
+									<TriangleAlert size={22} />
+									<div>
+										<div className="eyebrow">
+											{dateLabel(playedOn)} /{" "}
+											{display(
+												warning.competition ??
+													match?.competition.name,
+											)}
+										</div>
+										<h2>
+											{display(
+												warning.home_club ??
+													match?.home ??
+													"Unknown home club",
+											)}{" "}
+											/{" "}
+											{display(
+												warning.away_club ??
+													match?.away ??
+													"Unknown away club",
+											)}
+										</h2>
+										<p>
+											<strong>
+												{display(
+													warning.title ??
+														label(
+															String(
+																warning.code ??
+																	"data_warning",
+															),
+														),
+												)}
+											</strong>
+										</p>
+										{warning.code ===
+											"player_goal_difference" && (
+											<p>
+												Team goals:{" "}
+												<strong>
+													{display(
+														warning.team_goals,
+													)}
+												</strong>
+												. Credited player goals:{" "}
+												<strong>
+													{display(
+														warning.credited_player_goals,
+													)}
+												</strong>
+												.
+											</p>
+										)}
+										<p className="muted">
+											{display(
+												warning.detail ??
+													"Details unavailable for this warning.",
+											)}
+										</p>
+										{typeof warning.match_id ===
+											"string" && (
+											<CareerLink
+												to={`/matches/${warning.match_id}`}
+												className="button secondary"
+											>
+												Open match{" "}
+												<ArrowRight size={15} />
+											</CareerLink>
+										)}
+									</div>
+								</section>
+							);
+						})
 					) : (
 						<Empty title="No reconciliation warnings" />
 					)}
@@ -756,8 +844,8 @@ export function Explorer() {
 				<span
 					className={
 						key === "id" ||
-							(key.endsWith("_id") && resolved === value) ||
-							key === "sha256"
+						(key.endsWith("_id") && resolved === value) ||
+						key === "sha256"
 							? "short-id"
 							: "raw-cell"
 					}

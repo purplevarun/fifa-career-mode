@@ -190,9 +190,11 @@ test("verification exposes partial comparisons and the goal warning", async ({
 	await page.keyboard.press("Escape");
 	await page.getByRole("tab", { name: "Warnings (1)" }).click();
 	await expect(page.locator(".warning-record")).toContainText("Portsmouth");
+	await expect(page.locator(".warning-record")).toContainText("Player goals exceed team score");
+	await expect(page.locator(".warning-record")).not.toContainText("undefined");
 	await page.getByRole("link", { name: "Open match" }).click();
 	await expect(page.locator(".notice.warning")).toContainText(
-		"Credited player goals: 0",
+		"Credited player goals: 2",
 	);
 });
 

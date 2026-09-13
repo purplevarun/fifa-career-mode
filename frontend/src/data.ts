@@ -100,6 +100,7 @@ export interface Dataset {
 	};
 	match_coverage: {
 		summary: Row;
+		matches?: Row[];
 		warnings: Row[];
 		player_field_availability: Row;
 	};

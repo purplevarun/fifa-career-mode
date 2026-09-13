@@ -612,12 +612,13 @@ class ImportTests(DatabaseTestCase):
         result = self.connection.execute("SELECT goals_conceded, goals_conceded_displayed FROM player_matches").fetchone()
         self.assertEqual(tuple(result), (1, 5))
 
-    def test_coverage_reports_differences_without_modifying_records(self):
+    def test_coverage_assumes_opponent_own_goals_without_modifying_records(self):
         self.approved_match()
+        self.connection.execute("UPDATE matches SET home_goals = 3, away_goals = 2")
         player_id = self.create_player("Takefusa Kubo")
         insert_entity(self.connection, "player_matches", {
             "match_id": self.match_id, "player_id": player_id, "club_id": self.home_club_id,
-            "displayed_position": "CAM", "goals": 0, "assists": 1, "rating": 8.4, "overall": 63,
+            "displayed_position": "CAM", "goals": 2, "assists": 1, "rating": 8.4, "overall": 63,
             "shots_on_target": 1, "shots_off_target": 0,
         })
         self.connection.commit()
@@ -627,10 +628,74 @@ class ImportTests(DatabaseTestCase):
         self.assertEqual(report["summary"]["player_records"], 1)
         self.assertEqual(report["summary"]["matches_with_two_complete_team_rows"], 0)
         self.assertEqual(report["player_field_availability"]["minutes_played"], {"recorded": 0, "null": 1})
+        self.assertNotIn("player_goal_difference", [warning["code"] for warning in report["warnings"]])
+        self.assertEqual(report["matches"][0]["goal_difference"], 1)
+        self.assertEqual(report["matches"][0]["assumed_own_goals"], 1)
+        self.assertEqual(report["summary"]["assumed_own_goals"], 1)
+        self.assertEqual(self.connection.execute("SELECT home_goals FROM matches").fetchone()[0], 3)
+        self.assertEqual(self.connection.execute("SELECT goals FROM player_matches").fetchone()[0], 2)
+
+    def test_coverage_warns_when_player_goals_exceed_team_score(self):
+        self.approved_match()
+        player_id = self.create_player("Takefusa Kubo")
+        insert_entity(self.connection, "player_matches", {
+            "match_id": self.match_id, "player_id": player_id, "club_id": self.home_club_id,
+            "displayed_position": "CAM", "goals": 2,
+        })
+        self.connection.commit()
+
+        report = coverage_report(self.connection)
+
         discrepancy = next(warning for warning in report["warnings"] if warning["code"] == "player_goal_difference")
-        self.assertEqual(discrepancy["difference"], 1)
+        self.assertEqual(discrepancy["difference"], -1)
+        self.assertEqual(report["matches"][0]["assumed_own_goals"], 0)
         self.assertEqual(self.connection.execute("SELECT home_goals FROM matches").fetchone()[0], 1)
-        self.assertEqual(self.connection.execute("SELECT goals FROM player_matches").fetchone()[0], 0)
+        self.assertEqual(self.connection.execute("SELECT goals FROM player_matches").fetchone()[0], 2)
+
+    def test_coverage_does_not_assume_own_goals_with_unknown_player_goals(self):
+        self.approved_match()
+        player_id = self.create_player("Takefusa Kubo")
+        insert_entity(self.connection, "player_matches", {
+            "match_id": self.match_id, "player_id": player_id, "club_id": self.home_club_id,
+            "displayed_position": "CAM", "goals": None,
+        })
+        self.connection.commit()
+
+        report = coverage_report(self.connection)
+
+        self.assertIsNone(report["matches"][0]["credited_player_goals"])
+        self.assertIsNone(report["matches"][0]["assumed_own_goals"])
+        self.assertIn("missing_player_core_fields", [warning["code"] for warning in report["warnings"]])
+
+    def test_coverage_warnings_identify_fixtures_and_missing_statistics(self):
+        self.approved_match()
+        player_id = self.create_player("Aaron Ramsdale")
+        insert_entity(self.connection, "player_matches", {
+            "match_id": self.match_id, "player_id": player_id, "club_id": self.home_club_id,
+            "displayed_position": "GK", "goals_conceded": 1, "shots_caught": 2, "shots_parried": 0,
+            "rating": 6.5, "overall": 65, "assists": None,
+        })
+        self.connection.execute(
+            "UPDATE team_matches SET shots = 3, shots_on_target = 2, possession_pct = 50, tackles = 1, "
+            "fouls = 0, corners = NULL, shot_accuracy_pct = 67, pass_accuracy_pct = 80 WHERE match_id = ?",
+            (self.match_id,),
+        )
+        self.connection.commit()
+
+        report = coverage_report(self.connection)
+
+        warnings = {warning["code"]: warning for warning in report["warnings"]}
+        self.assertEqual(warnings["missing_player_core_fields"]["fields"], {"assists": 1})
+        self.assertEqual(warnings["missing_player_core_fields"]["detail"], "Missing player stats: Aaron Ramsdale (assists).")
+        self.assertEqual(warnings["incomplete_team_statistics"]["detail"],
+                         "Missing team stats: Notts County (corners); Dundee FC (corners).")
+        for warning in report["warnings"]:
+            self.assertEqual(warning["played_on"], "2018-07-04")
+            self.assertEqual(warning["home_club"], "Notts County")
+            self.assertEqual(warning["away_club"], "Dundee FC")
+            self.assertEqual(warning["competition"], "European International Cup")
+            self.assertTrue(warning["title"])
+            self.assertTrue(warning["detail"])
 
     def test_coverage_does_not_treat_unknown_scores_as_draws(self):
         source_id, document = self.approved_match()
@@ -640,6 +705,7 @@ class ImportTests(DatabaseTestCase):
         self.assertEqual(report["competitions"][0]["known_results"], 0)
         self.assertEqual(report["competitions"][0]["draws"], 0)
         self.assertIsNone(report["matches"][0]["goal_difference"])
+        self.assertIsNone(report["matches"][0]["assumed_own_goals"])
         self.assertIn("missing_match_score", [warning["code"] for warning in report["warnings"]])
 
 

@@ -450,6 +450,10 @@ export function MatchDetail() {
 	const warnings = model.data.match_coverage.warnings.filter(
 		(row) => row.match_id === match.id,
 	);
+	const coverage = model.data.match_coverage.matches?.find(
+		(row) => row.match_id === match.id,
+	);
+	const assumedOwnGoals = Number(coverage?.assumed_own_goals ?? 0);
 	const columns: Column<Performance>[] = [
 		{
 			key: "player_id",
@@ -548,14 +552,47 @@ export function MatchDetail() {
 				</span>
 				<div className="grow" />
 			</div>
+			{assumedOwnGoals > 0 && (
+				<div className="notice positive">
+					<div>
+						<strong>
+							Assumed opponent own goals:{" "}
+							{display(assumedOwnGoals)}
+						</strong>
+						<p>
+							Team goals: {display(coverage?.team_goals)}.
+							Credited player goals:{" "}
+							{display(coverage?.credited_player_goals)}.
+							Individual goal credits unchanged.
+						</p>
+					</div>
+				</div>
+			)}
 			{warnings.map((warning, index) => (
 				<div className="notice warning" key={index}>
-					<strong>Goal attribution</strong>
-					<span>
-						Team score: {String(warning.team_goals)}. Credited
-						player goals: {String(warning.credited_player_goals)}.
-						Attribution remains unconfirmed.
-					</span>
+					<div>
+						<strong>
+							{display(
+								warning.title ??
+									label(
+										String(warning.code ?? "data_warning"),
+									),
+							)}
+						</strong>
+						{warning.code === "player_goal_difference" && (
+							<p>
+								Team goals: {display(warning.team_goals)}.
+								Credited player goals:{" "}
+								{display(warning.credited_player_goals)}.
+							</p>
+						)}
+						<p>
+							{display(
+								warning.detail ??
+									"Details unavailable for this warning.",
+							)}
+						</p>
+					</div>
 				</div>
 			))}
 			<section className="section">
@@ -1294,8 +1331,8 @@ export function Competitions() {
 			<div className="competition-grid">
 				{competitions.map((competition) => {
 					const fixtures = matches.filter(
-						(match) => match.competition.id === competition.id,
-					),
+							(match) => match.competition.id === competition.id,
+						),
 						summary = summarize(fixtures);
 					return (
 						<CareerLink

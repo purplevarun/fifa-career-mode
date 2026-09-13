@@ -167,7 +167,15 @@ verification tooltips. A recorded match position takes precedence over the
 displayed position. Existing goal counts are never replaced, and the raw SQLite
 values are retained. Other missing values, including outfield goals, stay
 unknown. Shootout scores stay separate from match goals, and cumulative season
-totals are not added to match totals. Optional
-real-image OCR regression tests use
+totals are not added to match totals.
+
+When the recorded player goal total is lower than the team score, the difference
+is treated as **assumed opponent own goals**. Verification and match details
+label this assumption separately from warnings. Team scores and individual player
+credits are never rewritten or assigned to an invented player. Excess player
+goal credits still produce a warning, and unknown goal totals stay unknown.
+Other warnings identify the fixture and the missing player or team statistics.
+
+Optional real-image OCR regression tests use
 `CAREER_OCR_TESTS=1 python3 -W error::ResourceWarning -m unittest discover -s processing/tests -q`
 while those original fixtures remain available.
