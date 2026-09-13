@@ -347,20 +347,18 @@ class ScreenshotTests(unittest.TestCase):
         cls.root = Path(__file__).resolve().parents[2]
 
     def extract(self, sequence, method, **kwargs):
-        with Image.open(
-            self.root / "raw_screenshots" / f"Screenshot ({sequence}).png"
-        ) as image:
+        with Image.open(self.root / "raw_screenshots" / f"{sequence}.png") as image:
             return method(image.convert("RGB"), **kwargs)[0]
 
     def test_preseason_score_and_team_stats(self):
-        record = self.extract(73, self.extractor.extract_match)
+        record = self.extract(4, self.extractor.extract_match)
         self.assertEqual((record["home_goals"], record["away_goals"]), (1, 1))
         self.assertEqual(record["competition"], "European International Cup")
         self.assertEqual(record["team_stats"]["home"]["shots"], 6)
         self.assertEqual(record["team_stats"]["away"]["fouls"], 0)
 
     def test_outfield_zeroes_and_passing(self):
-        record = self.extract(76, self.extractor.extract_player)
+        record = self.extract(7, self.extractor.extract_player)
         self.assertEqual(record["player"], "Takefusa Kubo")
         self.assertEqual(record["goals"], 0)
         self.assertEqual(record["assists"], 1)
@@ -375,7 +373,7 @@ class ScreenshotTests(unittest.TestCase):
         self.assertEqual(record["possession_lost"], 10)
 
     def test_goalkeeper_layout(self):
-        record = self.extract(108, self.extractor.extract_player, goalkeeper=True)
+        record = self.extract(26, self.extractor.extract_player, goalkeeper=True)
         self.assertEqual(record["player"], "Aaron Ramsdale")
         self.assertEqual(record["goals_conceded"], 0)
         self.assertEqual(record["shots_caught"], 4)
@@ -384,10 +382,10 @@ class ScreenshotTests(unittest.TestCase):
         self.assertNotIn("goals", record)
 
     def test_november_single_digit_stats_are_not_missing(self):
-        keeper = self.extract(1448, self.extractor.extract_player, goalkeeper=True)
+        keeper = self.extract(1302, self.extractor.extract_player, goalkeeper=True)
         self.assertEqual(keeper["player"], "Frederik Schram")
         self.assertEqual(keeper["assists"], 0)
-        for sequence, played_on in ((1443, "2019-11-12"), (1457, "2019-11-16")):
+        for sequence, played_on in ((1297, "2019-11-12"), (1310, "2019-11-16")):
             with self.subTest(sequence=sequence):
                 match = self.extract(sequence, self.extractor.extract_match)
                 self.assertEqual(match["played_on"], played_on)
@@ -397,18 +395,18 @@ class ScreenshotTests(unittest.TestCase):
 
     def test_remaining_warning_screens_have_numeric_values(self):
         for sequence in (
-            1460,
-            1477,
-            1489,
-            1506,
-            1522,
-            1538,
-            1550,
-            1563,
-            1576,
-            1595,
-            1609,
-            1610,
+            1313,
+            1330,
+            1342,
+            1358,
+            1374,
+            1390,
+            1402,
+            1415,
+            1428,
+            1447,
+            1461,
+            1462,
         ):
             with self.subTest(goalkeeper=sequence):
                 player = self.extract(
@@ -427,15 +425,15 @@ class ScreenshotTests(unittest.TestCase):
             "pass_accuracy_pct",
         )
         expected = {
-            1472: ((5, 1, 47, 5, 1, 1, 20, 88), (4, 3, 53, 10, 0, 0, 75, 90)),
-            1487: ((7, 4, 44, 6, 2, 1, 57, 86), (6, 2, 56, 2, 0, 2, 33, 78)),
-            1503: ((12, 7, 57, 5, 1, 4, 58, 85), (5, 3, 43, 11, 2, 1, 60, 83)),
-            1517: ((4, 0, 47, 6, 0, 2, 0, 87), (8, 5, 53, 6, 0, 1, 62, 86)),
-            1531: ((6, 3, 52, 7, 0, 5, 50, 71), (1, 1, 48, 3, 0, 0, 100, 85)),
-            1558: ((2, 1, 52, 6, 0, 1, 50, 91), (4, 2, 48, 6, 1, 2, 50, 80)),
-            1574: ((8, 2, 51, 7, 1, 0, 25, 88), (9, 5, 49, 12, 1, 0, 55, 91)),
-            1590: ((7, 5, 41, 5, 2, 2, 71, 82), (10, 8, 59, 5, 2, 1, 80, 84)),
-            1605: ((2, 2, 45, 6, 0, 0, 100, 82), (3, 1, 55, 7, 3, 1, 33, 80)),
+            1325: ((5, 1, 47, 5, 1, 1, 20, 88), (4, 3, 53, 10, 0, 0, 75, 90)),
+            1340: ((7, 4, 44, 6, 2, 1, 57, 86), (6, 2, 56, 2, 0, 2, 33, 78)),
+            1355: ((12, 7, 57, 5, 1, 4, 58, 85), (5, 3, 43, 11, 2, 1, 60, 83)),
+            1369: ((4, 0, 47, 6, 0, 2, 0, 87), (8, 5, 53, 6, 0, 1, 62, 86)),
+            1383: ((6, 3, 52, 7, 0, 5, 50, 71), (1, 1, 48, 3, 0, 0, 100, 85)),
+            1410: ((2, 1, 52, 6, 0, 1, 50, 91), (4, 2, 48, 6, 1, 2, 50, 80)),
+            1426: ((8, 2, 51, 7, 1, 0, 25, 88), (9, 5, 49, 12, 1, 0, 55, 91)),
+            1442: ((7, 5, 41, 5, 2, 2, 71, 82), (10, 8, 59, 5, 2, 1, 80, 84)),
+            1457: ((2, 2, 45, 6, 0, 0, 100, 82), (3, 1, 55, 7, 3, 1, 33, 80)),
         }
         for sequence, values in expected.items():
             with self.subTest(match=sequence):
@@ -446,14 +444,14 @@ class ScreenshotTests(unittest.TestCase):
                     )
 
     def test_squad_overall_snapshots(self):
-        first = self.extract(70, self.extractor.extract_snapshot)
-        last = self.extract(1055, self.extractor.extract_snapshot)
+        first = self.extract(1, self.extractor.extract_snapshot)
+        last = self.extract(909, self.extractor.extract_snapshot)
         self.assertEqual((first["overall"], last["overall"]), (62, 65))
         self.assertEqual(first["player"], last["player"])
         self.assertIsNone(first["observed_on"])
 
     def test_season_totals_remain_separate_from_match_stats(self):
-        with Image.open(self.root / "raw_screenshots/Screenshot (1056).png") as image:
+        with Image.open(self.root / "raw_screenshots/910.png") as image:
             records, evidence = self.extractor.extract_squad_totals(
                 image.convert("RGB")
             )
@@ -471,9 +469,7 @@ class ScreenshotTests(unittest.TestCase):
         self.assertIn("season_totals.5.goals", evidence)
 
     def test_season_table_detection_survives_misread_heading(self):
-        extraction = self.extractor.extract(
-            self.root / "raw_screenshots/Screenshot (1071).png"
-        )
+        extraction = self.extractor.extract(self.root / "raw_screenshots/925.png")
         records = [
             record
             for record in extraction["records"]
@@ -483,9 +479,7 @@ class ScreenshotTests(unittest.TestCase):
         self.assertEqual(records[0]["player"], "Elliott Hewitt")
 
     def test_completed_loan_preserves_terms_without_inventing_a_date_or_fee(self):
-        extraction = self.extractor.extract(
-            self.root / "raw_screenshots/Screenshot (1231).png"
-        )
+        extraction = self.extractor.extract(self.root / "raw_screenshots/1085.png")
         self.assertEqual(
             [record["type"] for record in extraction["records"]], ["player_transfer"]
         )
@@ -499,12 +493,12 @@ class ScreenshotTests(unittest.TestCase):
 
     def test_completed_permanent_transfers(self):
         for sequence, player, wage, months in (
-            (1124, "Matty James", 3599900, 24),
-            (1158, "Tosin Adarabioyo", 590000, 36),
+            (978, "Matty James", 3599900, 24),
+            (1012, "Tosin Adarabioyo", 590000, 36),
         ):
             with self.subTest(sequence=sequence):
                 extraction = self.extractor.extract(
-                    self.root / "raw_screenshots" / f"Screenshot ({sequence}).png"
+                    self.root / "raw_screenshots" / f"{sequence}.png"
                 )
                 self.assertEqual(len(extraction["records"]), 1)
                 record = extraction["records"][0]
@@ -516,13 +510,13 @@ class ScreenshotTests(unittest.TestCase):
 
     def test_player_of_the_month_articles_and_headlines(self):
         for sequence, player, period, announced_on, competition in (
-            (328, "King", "2018-08", "2018-09-05", "EFL League Two"),
-            (403, "King", "2018-09", "2018-10-05", "EFL League Two"),
-            (1354, "Calvert-Lewin", "2019-09", "2019-10-05", None),
+            (183, "King", "2018-08", "2018-09-05", "EFL League Two"),
+            (257, "King", "2018-09", "2018-10-05", "EFL League Two"),
+            (1208, "Calvert-Lewin", "2019-09", "2019-10-05", None),
         ):
             with self.subTest(sequence=sequence):
                 extraction = self.extractor.extract(
-                    self.root / "raw_screenshots" / f"Screenshot ({sequence}).png"
+                    self.root / "raw_screenshots" / f"{sequence}.png"
                 )
                 self.assertEqual(len(extraction["records"]), 1)
                 record = extraction["records"][0]
@@ -533,9 +527,9 @@ class ScreenshotTests(unittest.TestCase):
                 self.assertEqual(record["competition"], competition)
 
     def test_player_and_goalkeeper_competition_awards(self):
-        player = self.extractor.extract(
-            self.root / "raw_screenshots/Screenshot (222).png"
-        )["records"][0]
+        player = self.extractor.extract(self.root / "raw_screenshots/81.png")[
+            "records"
+        ][0]
         self.assertEqual(
             (player["event_type"], player["player"]),
             ("player_of_the_competition", "Haaland"),
@@ -545,9 +539,9 @@ class ScreenshotTests(unittest.TestCase):
             ("Notts County", "European International Cup"),
         )
         self.assertEqual(player["announced_on"], "2018-07-18")
-        records = self.extractor.extract(
-            self.root / "raw_screenshots/Screenshot (1053).png"
-        )["records"]
+        records = self.extractor.extract(self.root / "raw_screenshots/907.png")[
+            "records"
+        ]
         by_type = {record["event_type"]: record for record in records}
         self.assertEqual(len(records), 3)
         self.assertEqual(
@@ -562,9 +556,7 @@ class ScreenshotTests(unittest.TestCase):
         self.assertIsNone(by_type["golden_boot"]["competition"])
 
     def test_tournament_winner_does_not_invent_a_fixture_or_season(self):
-        extraction = self.extractor.extract(
-            self.root / "raw_screenshots/Screenshot (221).png"
-        )
+        extraction = self.extractor.extract(self.root / "raw_screenshots/80.png")
         self.assertEqual(len(extraction["records"]), 1)
         record = extraction["records"][0]
         self.assertEqual(record["type"], "competition_event")
@@ -576,14 +568,14 @@ class ScreenshotTests(unittest.TestCase):
 
     def test_dashboard_award_banners_do_not_borrow_match_or_training_details(self):
         for sequence, player, period in (
-            (823, "Williams", "2019-01"),
-            (866, "Haaland", "2019-02"),
-            (959, "Haaland", "2019-03"),
-            (1263, "Kubo", "2019-08"),
+            (677, "Williams", "2019-01"),
+            (720, "Haaland", "2019-02"),
+            (813, "Haaland", "2019-03"),
+            (1117, "Kubo", "2019-08"),
         ):
             with self.subTest(sequence=sequence):
                 extraction = self.extractor.extract(
-                    self.root / "raw_screenshots" / f"Screenshot ({sequence}).png"
+                    self.root / "raw_screenshots" / f"{sequence}.png"
                 )
                 self.assertEqual(extraction["screen_type"], "dashboard_award")
                 self.assertEqual(len(extraction["records"]), 1)

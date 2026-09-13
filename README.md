@@ -161,6 +161,11 @@ numeric screenshot order. An unrelated or unrecognized screen breaks that
 context, so a player is never automatically attached across it. Goalkeeper
 counts that include penalties are separated from the recorded shootout score.
 
+The archive uses consecutive filenames such as `1.png`, `2.png`, and `3.png`.
+Append new screenshots with numbers above the current highest number, keeping
+each match summary before its player screenshots. Renumbering is safe only when
+the existing numeric order is preserved; alphabetical order is not equivalent.
+
 Each source is validated and saved in its own transaction. Unsupported screens,
 missing required context, and conflicting records are reported under
 `import.skipped_sources`; they do not block attempts to import other valid
