@@ -203,7 +203,9 @@ describe("local stats pages", () => {
 				</MemoryRouter>,
 			);
 			expect(html).not.toContain("Assumed opponent own goals");
-			expect(html).not.toContain("Team goals: 1. Credited player goals: 0.");
+			expect(html).not.toContain(
+				"Team goals: 1. Credited player goals: 0.",
+			);
 			expect(html).not.toContain("Individual goal credits unchanged.");
 			expect(html).not.toContain("undefined");
 			expect(html).not.toContain('class="warning-record"');
@@ -281,6 +283,75 @@ describe("local stats pages", () => {
 		);
 		expect(html).not.toContain("passes_completed?");
 	});
+
+	it.each([
+		{
+			completedAt: "2026-09-13T06:27:18+00:00",
+			extractedAt: "2026-09-13T06:20:00+00:00",
+			expected: "Last processed:",
+			date: "2026-09-13T06:27:18+00:00",
+			skipped: 36,
+		},
+		{
+			completedAt: null,
+			extractedAt: "2026-09-13T06:20:00+00:00",
+			expected: "Last OCR saved:",
+			date: "2026-09-13T06:20:00+00:00",
+			skipped: 0,
+		},
+		{
+			completedAt: null,
+			extractedAt: null,
+			expected: "Last processed: Not recorded",
+			date: null,
+			skipped: 0,
+		},
+	])(
+		"shows $expected independently of page load time",
+		({ completedAt, extractedAt, expected, date, skipped }) => {
+			const processed = createModel({
+				...fixture,
+				generated_at: "2030-01-01T00:00:00+00:00",
+				data_source: {
+					label: "Fresh processing preview",
+					preview: true,
+				},
+				processing: {
+					last_run: completedAt
+						? {
+								id: "00000000-0000-4000-8000-000000000900",
+								completed_at: completedAt,
+								mode: "incremental",
+								status: skipped ? "partial" : "completed",
+								extracted_images: 0,
+								imported_sources: 0,
+								skipped_sources: skipped,
+								extraction_errors: 0,
+							}
+						: null,
+					last_extracted_at: extractedAt,
+				},
+			});
+			const html = renderToStaticMarkup(
+				<MemoryRouter initialEntries={["/"]}>
+					<CareerContext
+						value={{
+							model: processed,
+							filters: defaultFilters,
+							matches: processed.matches,
+						}}
+					>
+						<Overview />
+					</CareerContext>
+				</MemoryRouter>,
+			);
+			expect(html).toContain("Fresh processing preview");
+			expect(html).toContain(expected);
+			expect(html).not.toContain("2030");
+			if (date) expect(html).toContain(`dateTime="${date}"`);
+			if (skipped) expect(html).toContain("36 sources not imported");
+		},
+	);
 
 	it("replaces the overview goal trend with six player ranking charts", () => {
 		const ranked = createModel({

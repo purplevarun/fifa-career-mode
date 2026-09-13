@@ -7,7 +7,7 @@ from pathlib import Path
 
 from .database import connect, coverage_report, inventory, json_text, status, validate_database
 from .identifiers import new_id
-from .pipeline import approve_review, backup_database, dashboard_data, extract_pending, import_pending, make_review, parse_sequences, write_json
+from .pipeline import approve_review, backup_database, dashboard_data, extract_pending, import_pending, make_review, parse_sequences, record_processing_run, write_json
 from .reconciliation import reconcile_totals
 
 
@@ -118,11 +118,14 @@ def main(argv=None):
                     result["message"] = "Clean rebuild failed; the active database was not changed. See extraction errors and skipped sources."
                     print(json_text(result), end="")
                     return 1
+            mode = "clean" if reset else "reextract" if arguments.reextract else "incremental"
+            result["processing_run"] = record_processing_run(connection, mode, results, imported)
+            if reset:
                 database_path.parent.mkdir(parents=True, exist_ok=True)
                 with closing(sqlite3.connect(database_path)) as active:
                     connection.backup(active)
             if imported["imported_sources"]:
-                result["message"] = "Stats saved to SQLite automatically. Reload the local dashboard to see the changes."
+                result["message"] = "Stats saved to SQLite automatically. The local dashboard updates automatically."
             else:
                 result["message"] = ("The reset database contains no saved stats; see extraction errors and skipped sources."
                                      if arguments.clean else "No new stats saved. Existing stats are unchanged; see skipped sources for any unreadable or incomplete records.")

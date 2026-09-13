@@ -648,11 +648,46 @@ def write_json(path, value, overwrite=True):
             temporary_path.unlink()
 
 
+def record_processing_run(connection, mode, extraction, imported):
+    run = {
+        "completed_at": datetime.now(timezone.utc).isoformat(), "mode": mode,
+        "status": "partial" if extraction["errors"] or imported["skipped_sources"] else "completed",
+        "extracted_images": extraction["extracted"], "imported_sources": imported["imported_sources"],
+        "skipped_sources": len(imported["skipped_sources"]), "extraction_errors": extraction["errors"],
+    }
+    with connection:
+        connection.execute(
+            "CREATE TABLE IF NOT EXISTS processing_runs ("
+            "id TEXT PRIMARY KEY NOT NULL CHECK (length(id) = 36), completed_at TEXT NOT NULL, "
+            "mode TEXT NOT NULL CHECK (mode IN ('incremental', 'reextract', 'clean')), "
+            "status TEXT NOT NULL CHECK (status IN ('completed', 'partial')), "
+            "extracted_images INTEGER NOT NULL CHECK (extracted_images >= 0), "
+            "imported_sources INTEGER NOT NULL CHECK (imported_sources >= 0), "
+            "skipped_sources INTEGER NOT NULL CHECK (skipped_sources >= 0), "
+            "extraction_errors INTEGER NOT NULL CHECK (extraction_errors >= 0))"
+        )
+        identifier = insert_entity(connection, "processing_runs", run)
+    return {"id": identifier, **run}
+
+
+def processing_summary(connection):
+    last_run = None
+    if connection.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'processing_runs'").fetchone():
+        row = connection.execute("SELECT * FROM processing_runs ORDER BY completed_at DESC, rowid DESC LIMIT 1").fetchone()
+        last_run = dict(row) if row else None
+    extracted_at = connection.execute("SELECT MAX(extracted_at) FROM extractions").fetchone()[0]
+    if extracted_at:
+        timestamp = datetime.fromisoformat(extracted_at)
+        extracted_at = timestamp.replace(tzinfo=timezone.utc).isoformat() if timestamp.tzinfo is None else timestamp.isoformat()
+    return {"last_run": last_run, "last_extracted_at": extracted_at}
+
+
 def build_dataset(connection):
     errors = validate_database(connection)
     if errors:
         raise ValueError("Cannot export an invalid database: " + "; ".join(errors))
     data = {"schema_version": SCHEMA_VERSION, "generated_at": datetime.now(timezone.utc).isoformat(),
+            "processing": processing_summary(connection),
             "coverage": status(connection), "match_coverage": coverage_report(connection),
             "season_reconciliation": reconcile_totals(connection)}
     for table in EXPORT_TABLES:

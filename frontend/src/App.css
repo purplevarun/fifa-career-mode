@@ -497,6 +497,43 @@
 		flex-wrap: wrap;
 	}
 
+	.processing-strip {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 8px 22px;
+		margin: -8px 0 24px;
+		font-size: 12px;
+		line-height: 1.6;
+		color: var(--muted);
+	}
+
+	.processing-source,
+	.processing-time {
+		display: inline-flex;
+		align-items: center;
+		gap: 7px;
+		min-width: 0;
+	}
+
+	.processing-strip svg {
+		flex-shrink: 0;
+	}
+
+	.processing-source {
+		font-weight: 500;
+		color: var(--green);
+	}
+
+	.processing-source.preview,
+	.processing-issues {
+		color: #925136;
+	}
+
+	.processing-strip time {
+		color: var(--text);
+	}
+
 	.section {
 		margin-top: 30px;
 	}

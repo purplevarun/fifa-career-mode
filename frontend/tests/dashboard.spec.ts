@@ -3,6 +3,9 @@ import { fixture as data } from "./fixture";
 
 test.beforeEach(async ({ page }) => {
 	await page.route("**/api/stats", (route) => route.fulfill({ json: data }));
+	await page.route("**/api/stats/version", (route) =>
+		route.fulfill({ json: { revision: "fixture" } }),
+	);
 });
 const season = data.seasons.find((season) => season.label === "2018/19")!;
 const league = data.competitions.find(
@@ -106,6 +109,46 @@ test("overview preserves filters, preseason and mobile navigation", async ({
 		animations: "disabled",
 	});
 	expect(errors).toEqual([]);
+});
+
+test("an open dashboard follows a deleted and recreated database", async ({
+	page,
+}) => {
+	let revision: string | null = "original";
+	const fresh = {
+		...data,
+		players: data.players.map((entry) =>
+			entry.id === player.id ? { ...entry, name: "Fresh Player" } : entry,
+		),
+	};
+	await page.route("**/api/stats/version", (route) =>
+		route.fulfill({ json: { revision } }),
+	);
+	await page.route("**/api/stats", (route) =>
+		route.fulfill({ json: revision === "rebuilt" ? fresh : data }),
+	);
+	await page.goto("/");
+	await expect(
+		page.getByRole("heading", { name: "Career overview", exact: true }),
+	).toBeVisible();
+
+	revision = null;
+	await expect(page.getByRole("alert")).toHaveText(
+		"Waiting for processed career data.",
+		{ timeout: 10000 },
+	);
+	await expect(
+		page.getByRole("heading", { name: "Career overview", exact: true }),
+	).toHaveCount(0);
+
+	revision = "rebuilt";
+	await expect(
+		page.getByRole("heading", { name: "Career overview", exact: true }),
+	).toBeVisible({ timeout: 10000 });
+	await expect(
+		page.locator('[data-statistic="goals"] [role="img"]'),
+	).toHaveAttribute("aria-label", /Fresh Player/);
+	await expect(page.getByRole("alert")).toHaveCount(0);
 });
 
 test("fixture search, score and player records work without screenshots", async ({

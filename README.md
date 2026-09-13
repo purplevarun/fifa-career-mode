@@ -33,6 +33,37 @@ of silently choosing another port. The dashboard reads the current SQLite
 database through a local `/api/stats` endpoint. There is no separate server to
 start and no JSON export or frontend rebuild needed when stats change.
 
+The main dashboard always follows `processing/data/career.sqlite`, the same
+database written by `./run process`. It checks for changes every three seconds
+and reloads the dataset when the database or its SQLite write-ahead log changes.
+If the data folder is removed, the page stops displaying the old stats and waits;
+it automatically loads the newly created database as processing writes it.
+Neither a dev-server restart nor a manual browser reload is needed. Deleting
+the folder still removes its database, backups, and saved corrections.
+
+The homepage identifies the database being displayed and shows **Last processed**
+from its most recent finished processing run, in your local timezone. This time
+is saved in SQLite and does not change when the page reloads. Older databases
+without run history show **Last OCR saved** instead; this is the timestamp of
+their last saved extraction, not a claimed command-completion time. Skipped
+sources and OCR errors from a recorded run are displayed separately.
+
+To inspect another database without replacing the main archive, start a separate
+read-only dashboard instance on an unused port. These optional settings apply
+only to that server process; no `.env` file is required:
+
+```sh
+CAREER_DB="/absolute/path/to/preview.sqlite" \
+CAREER_DATA_LABEL="Fresh processing preview" \
+npm --prefix frontend run dev -- --port 5001 --strictPort
+```
+
+Both development and production-preview servers support these settings. They do
+not import data or alter the chosen database. Plain `./run start` continues to
+use the main archive. An alternate preview follows only its explicitly selected
+database; it never replaces or redirects the main archive. `./run start` ignores
+preview environment settings so it always opens the processor's main database.
+
 ## Overview Rankings
 
 The overview shows the top five Notts County players for goals, assists,
@@ -68,7 +99,8 @@ Put new images into `raw_screenshots/`, then run:
 This inventories images, skips previously extracted content, and automatically
 saves valid OCR results as dashboard statistics in SQLite. It also imports cached
 results left pending by older processing runs. **No review or approval step is
-required.** Click Reload in the dashboard after processing.
+required.** The open dashboard updates automatically; Reload can also refresh it
+immediately.
 
 Interrupted work resumes by rerunning the same command. Use `--limit 20` to OCR
 a smaller batch or `--reextract` to refresh OCR and fill missing stats. Neither

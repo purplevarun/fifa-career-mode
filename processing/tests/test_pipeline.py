@@ -935,13 +935,16 @@ class CommandTests(DatabaseTestCase):
         text = output.getvalue()
         return json.loads(text[text.index("{"):])
 
-    def launcher(self, *arguments):
+    def launcher(self, *arguments, report_environment=False):
         repository = Path(__file__).resolve().parents[2]
         bin_dir = self.root / "fake commands"
         bin_dir.mkdir(exist_ok=True)
         for name in ("npm", "python3"):
             executable = bin_dir / name
-            executable.write_text('#!/bin/sh\nprintf "%s\\n" "$PWD" "$@"\n', encoding="utf-8")
+            script = '#!/bin/sh\nprintf "%s\\n" "$PWD" "$@"\n'
+            if report_environment:
+                script += 'printf "CAREER_DB=%s\\nCAREER_DATA_LABEL=%s\\n" "${CAREER_DB-}" "${CAREER_DATA_LABEL-}"\n'
+            executable.write_text(script, encoding="utf-8")
             executable.chmod(0o755)
         environment = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
         return subprocess.run(
@@ -957,6 +960,13 @@ class CommandTests(DatabaseTestCase):
             str(repository), "--prefix", str(repository / "frontend"), "run", "dev", "--",
             "--port", "5000", "--strictPort", "--clearScreen", "false",
         ])
+
+    def test_launcher_start_never_inherits_a_preview_database(self):
+        with patch.dict(os.environ, {"CAREER_DB": "/temporary/preview.sqlite", "CAREER_DATA_LABEL": "Old preview"}):
+            result = self.launcher("start", report_environment=True)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines()[-2:], ["CAREER_DB=", "CAREER_DATA_LABEL="])
 
     def test_launcher_process_forwards_arguments_from_repository_root(self):
         repository = Path(__file__).resolve().parents[2]
@@ -987,6 +997,7 @@ class CommandTests(DatabaseTestCase):
         processed = self.command("process")
         self.assertEqual(processed["extraction"]["extracted"], 1)
         self.assertEqual(processed["import"]["imported_sources"], 1)
+        self.assertIn("dashboard updates automatically", processed["message"])
         self.assertNotIn("next", processed)
         self.assertNotIn("review_file", processed)
         self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM matches").fetchone()[0], 1)
@@ -997,6 +1008,70 @@ class CommandTests(DatabaseTestCase):
         self.assertNotIn("review_file", repeat)
         self.extractor.extract.assert_called_once()
         self.assertNotIn("source_images", self.command("data"))
+
+    def test_processing_timestamp_records_runs_not_dashboard_loads(self):
+        self.create_image()
+        first = self.command("process")["processing_run"]
+        self.assertTrue(is_uuid(first["id"]))
+        self.assertEqual(first["mode"], "incremental")
+        self.assertEqual(first["status"], "completed")
+        self.assertEqual(first["extracted_images"], 1)
+        self.assertTrue(first["completed_at"].endswith("+00:00"))
+        self.assertEqual(self.command("data")["processing"]["last_run"], first)
+        self.assertEqual(self.command("data")["processing"]["last_run"], first)
+        self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM processing_runs").fetchone()[0], 1)
+
+        repeated = self.command("process")["processing_run"]
+
+        self.assertNotEqual(repeated["id"], first["id"])
+        self.assertEqual(repeated["extracted_images"], 0)
+        self.assertGreaterEqual(repeated["completed_at"], first["completed_at"])
+        self.assertEqual(self.command("data")["processing"]["last_run"], repeated)
+
+    def test_legacy_database_exposes_last_ocr_without_inventing_a_run(self):
+        self.assertEqual(self.command("data")["processing"], {"last_run": None, "last_extracted_at": None})
+        self.create_image()
+        self.command("process")
+        with self.connection:
+            self.connection.execute("DROP TABLE processing_runs")
+            self.connection.execute("UPDATE extractions SET extracted_at = '2026-09-13 06:27:18'")
+
+        metadata = self.command("data")["processing"]
+
+        self.assertIsNone(metadata["last_run"])
+        self.assertEqual(metadata["last_extracted_at"], "2026-09-13T06:27:18+00:00")
+        self.assertIsNone(self.connection.execute("SELECT 1 FROM sqlite_master WHERE name = 'processing_runs'").fetchone())
+
+    def test_processing_metadata_reports_skipped_imports(self):
+        self.create_image()
+        self.extractor.extract.return_value = {
+            "screen_type": "squad", "records": [{"type": "player_snapshot", "player": "Test Player", "season": None}],
+            "evidence": {}, "issues": [],
+        }
+
+        result = self.command("process")
+
+        self.assertEqual(result["processing_run"]["status"], "partial")
+        self.assertEqual(result["processing_run"]["skipped_sources"], 1)
+        self.assertEqual(self.command("data")["processing"]["last_run"], result["processing_run"])
+
+    def test_clean_processing_metadata_is_published_only_on_success(self):
+        from processing.__main__ import main
+
+        self.create_image()
+        first = self.command("process")["processing_run"]
+        self.extractor.extract.side_effect = ValueError("OCR failed")
+        with redirect_stdout(io.StringIO()):
+            result = main(["--root", str(self.root), "--db", str(self.root / "career.sqlite"), "process", "--clean"])
+        self.assertEqual(result, 1)
+        self.assertEqual(self.command("data")["processing"]["last_run"], first)
+        self.extractor.extract.side_effect = None
+
+        rebuilt = self.command("process", "--clean")["processing_run"]
+
+        self.assertEqual(rebuilt["mode"], "clean")
+        self.assertNotEqual(rebuilt["id"], first["id"])
+        self.assertEqual(self.command("data")["processing"]["last_run"], rebuilt)
 
     def test_process_imports_previously_extracted_screenshots(self):
         self.create_image()

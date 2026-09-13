@@ -29,7 +29,7 @@ import nottsCountyCrest from "./assets/notts-county-crest.png";
 import { CareerContext } from "./context";
 import type { Filters, Model } from "./data";
 import { createModel, dateLabel, downloadJson, selectMatches } from "./data";
-import { loadCareerDataset } from "./loadData";
+import { watchCareerDataset } from "./loadData";
 import {
 	CompetitionDetail,
 	Competitions,
@@ -362,25 +362,27 @@ function App() {
 		setReload((value) => value + 1);
 	}
 	useEffect(() => {
-		const controller = new AbortController();
-		loadCareerDataset(fetch, "/api/stats", controller.signal)
-			.then((data) => {
-				if (controller.signal.aborted) return;
+		return watchCareerDataset(fetch, {
+			onData(data) {
 				setModel(createModel(data));
 				setError(null);
-			})
-			.catch((reason) => {
-				if (!controller.signal.aborted)
-					setError(
-						reason instanceof Error
-							? reason.message
-							: "Could not load career data.",
-					);
-			})
-			.finally(() => {
-				if (!controller.signal.aborted) setRefreshing(false);
-			});
-		return () => controller.abort();
+			},
+			onMissing() {
+				setModel(null);
+				setError("Waiting for processed career data.");
+			},
+			onError(reason) {
+				setModel(null);
+				setError(
+					reason instanceof Error
+						? reason.message
+						: "Could not load career data.",
+				);
+			},
+			onSettled() {
+				setRefreshing(false);
+			},
+		});
 	}, [reload]);
 	if (!model)
 		return (

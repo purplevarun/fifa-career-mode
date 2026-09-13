@@ -83,6 +83,20 @@ export interface Comparison extends Row {
 export interface Dataset {
 	schema_version: number;
 	generated_at: string;
+	data_source?: { label: string; preview: boolean };
+	processing?: {
+		last_run: {
+			id: string;
+			completed_at: string;
+			mode: "incremental" | "reextract" | "clean";
+			status: "completed" | "partial";
+			extracted_images: number;
+			imported_sources: number;
+			skipped_sources: number;
+			extraction_errors: number;
+		} | null;
+		last_extracted_at: string | null;
+	};
 	players: Player[];
 	clubs: Club[];
 	seasons: Season[];

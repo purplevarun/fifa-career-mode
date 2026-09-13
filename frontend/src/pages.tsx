@@ -3,6 +3,8 @@ import {
 	ArrowRight,
 	ArrowUpRight,
 	CalendarDays,
+	Clock3,
+	Database,
 	MapPin,
 	Shield,
 	Trophy,
@@ -214,6 +216,13 @@ export function Overview() {
 	const summary = summarize(matches);
 	const rankings = overviewRankings(model, matches);
 	const latest = matches.at(-1);
+	const processing = model.data.processing;
+	const lastRun = processing?.last_run;
+	const processedAt = lastRun?.completed_at ?? processing?.last_extracted_at;
+	const processedDate = processedAt ? new Date(processedAt) : null;
+	const timestampAvailable =
+		processedDate !== null && Number.isFinite(processedDate.getTime());
+	const source = model.data.data_source;
 	return (
 		<>
 			<PageHeading
@@ -222,6 +231,53 @@ export function Overview() {
 			>
 				<Pill tone="positive">{matches.length} recorded matches</Pill>
 			</PageHeading>
+			<div className="processing-strip" aria-label="Dataset processing">
+				<span
+					className={`processing-source${source?.preview ? " preview" : ""}`}
+				>
+					<Database size={14} />
+					{source?.label ?? "Main archive"}
+				</span>
+				<span
+					className="processing-time"
+					title={
+						!lastRun && timestampAvailable
+							? "Last saved OCR result; this older database has no processing-run completion time."
+							: undefined
+					}
+				>
+					<Clock3 size={14} />
+					<span>
+						{lastRun || !timestampAvailable
+							? "Last processed: "
+							: "Last OCR saved: "}
+						{timestampAvailable ? (
+							<time dateTime={processedAt ?? undefined}>
+								{processedDate.toLocaleString("en-GB", {
+									day: "numeric",
+									month: "short",
+									year: "numeric",
+									hour: "2-digit",
+									minute: "2-digit",
+									timeZoneName: "short",
+								})}
+							</time>
+						) : (
+							"Not recorded"
+						)}
+					</span>
+				</span>
+				{lastRun && lastRun.skipped_sources > 0 && (
+					<span className="processing-issues">
+						{display(lastRun.skipped_sources)} sources not imported
+					</span>
+				)}
+				{lastRun && lastRun.extraction_errors > 0 && (
+					<span className="processing-issues">
+						{display(lastRun.extraction_errors)} OCR errors
+					</span>
+				)}
+			</div>
 			<Kpis
 				items={[
 					{
