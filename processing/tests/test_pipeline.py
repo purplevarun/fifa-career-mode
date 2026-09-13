@@ -580,6 +580,33 @@ class ImportTests(DatabaseTestCase):
         saved = self.connection.execute("SELECT goals, assists, key_passes, interceptions, passes_completed_short FROM player_matches").fetchone()
         self.assertEqual(tuple(saved), (0, 1, 2, 4, 15))
 
+    def test_refreshed_team_fields_fill_blanks_without_replacing_saved_match_values(self):
+        source_id, document = self.approved_match()
+        extractor = Mock()
+        extractor.extract.return_value = {
+            "screen_type": "match_facts", "evidence": {}, "issues": [], "records": [{
+                **self.match_record(), "home_club": "Incorrect OCR club", "home_goals": 9,
+                "team_stats": {"home": {"shots": 99, "corners": 1}, "away": {"fouls": 8, "corners": 2}},
+            }],
+        }
+        extract_pending(self.connection, self.root, {73}, reextract=True, extractor=extractor)
+
+        source = make_review(self.connection, {73})["sources"][0]
+
+        self.assertFalse(source["complete"])
+        self.assertEqual(source["records"][0]["home_club"], "Notts County")
+        self.assertEqual(source["records"][0]["home_goals"], 1)
+        self.assertEqual(source["records"][0]["team_stats"], {"home": {"shots": 6, "corners": 1}, "away": {"fouls": 0, "corners": 2}})
+        result = import_pending(self.connection, {73}, {source_id})
+        self.assertEqual(result["imported_sources"], 1)
+        self.assertEqual(result["skipped_sources"], [])
+        home = self.connection.execute("SELECT shots, corners FROM team_matches WHERE club_id = ?", (self.home_club_id,)).fetchone()
+        away = self.connection.execute("SELECT fouls, corners FROM team_matches WHERE club_id != ?", (self.home_club_id,)).fetchone()
+        self.assertEqual(tuple(home), (6, 1))
+        self.assertEqual(tuple(away), (0, 2))
+        self.assertEqual(self.connection.execute("SELECT id FROM matches").fetchone()[0], self.match_id)
+        self.assertEqual(import_pending(self.connection, {73}, {source_id})["imported_sources"], 0)
+
     def test_fixture_context_rejects_interrupted_player_groups(self):
         source_id, document = self.approved_match()
         self.connection.execute("UPDATE source_images SET screen_type = 'match_facts' WHERE id = ?", (source_id,))
@@ -819,6 +846,43 @@ class AutomaticImportTests(DatabaseTestCase):
         self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM matches").fetchone()[0], 2)
         self.assertEqual(self.connection.execute("SELECT name FROM players").fetchone()[0], "Harry Kewell")
 
+    def test_outdated_missing_goalkeeper_counts_refresh_once(self):
+        keeper = {**self.player, "player": "Aaron Ramsdale", "displayed_position": "GK", "assists": None, "goals_conceded": 1}
+        self.extract(("match_facts", [self.match]), ("goalkeeper_performance", [keeper]))
+        import_pending(self.connection)
+        source_id = self.connection.execute("SELECT source_id FROM source_paths WHERE sequence = 74").fetchone()[0]
+        with self.connection:
+            self.connection.execute("UPDATE extractions SET extractor_version = '1.2.0', evidence_json = ? WHERE source_id = ?",
+                                    (json.dumps({"fields": {"assists": {"raw_text": "."}}}), source_id))
+        extractor = Mock()
+        extractor.extract.return_value = {
+            "screen_type": "goalkeeper_performance", "records": [{**keeper, "assists": 0}], "evidence": {}, "issues": [],
+        }
+
+        result = extract_pending(self.connection, self.root, extractor=extractor)
+
+        self.assertEqual(result["processed_source_ids"], [source_id])
+        self.assertIsNone(self.connection.execute("SELECT assists FROM player_matches").fetchone()[0])
+        import_pending(self.connection, refreshed_source_ids=result["processed_source_ids"])
+        self.assertEqual(self.connection.execute("SELECT assists FROM player_matches").fetchone()[0], 0)
+        self.assertEqual(extract_pending(self.connection, self.root, extractor=extractor)["extracted"], 0)
+        extractor.extract.assert_called_once()
+
+    def test_outdated_ocr_does_not_refresh_corrected_numeric_values(self):
+        self.extract(("match_facts", [self.match]), ("player_performance", [self.player]))
+        import_pending(self.connection)
+        with self.connection:
+            self.connection.execute("UPDATE extractions SET extractor_version = '1.2.0', evidence_json = ? WHERE source_id IN "
+                                    "(SELECT source_id FROM source_paths WHERE sequence = 74)",
+                                    (json.dumps({"fields": {"assists": {"raw_text": "."}}}),))
+        extractor = Mock()
+
+        result = extract_pending(self.connection, self.root, extractor=extractor)
+
+        self.assertEqual(result["extracted"], 0)
+        self.assertEqual(result["skipped"], 2)
+        extractor.extract.assert_not_called()
+
     def test_goalkeeper_shootout_count_is_normalized_automatically(self):
         keeper = {**self.player, "player": "Aaron Ramsdale", "displayed_position": "GK", "goals": None, "goals_conceded": 4}
         self.extract(("match_facts", [{**self.match, "home_penalties": 5, "away_penalties": 3}]),
@@ -962,6 +1026,28 @@ class CommandTests(DatabaseTestCase):
         self.assertEqual(result["import"]["skipped_sources"], [])
         data = self.command("data")
         self.assertEqual(data["player_matches"][0]["match_id"], data["matches"][0]["id"])
+
+    def test_process_refreshes_old_missing_team_counts_without_reextract(self):
+        self.create_image()
+        self.record["team_stats"] = {"home": {"corners": None}, "away": {"corners": None}}
+        self.extractor.extract.return_value["evidence"] = {"fields": {
+            "home.corners": {"raw_text": "."}, "away.corners": {"raw_text": "."},
+        }}
+        self.command("process")
+        match_id = self.command("data")["matches"][0]["id"]
+        with self.connection:
+            self.connection.execute("UPDATE extractions SET extractor_version = '1.2.0'")
+        self.record["team_stats"] = {"home": {"corners": 1}, "away": {"corners": 1}}
+
+        result = self.command("process")
+
+        self.assertEqual(result["extraction"]["extracted"], 1)
+        self.assertEqual(result["import"]["imported_sources"], 1)
+        data = self.command("data")
+        self.assertEqual(data["matches"][0]["id"], match_id)
+        self.assertEqual([team["corners"] for team in data["team_matches"]], [1, 1])
+        self.assertEqual(self.command("process")["extraction"]["extracted"], 0)
+        self.assertEqual(self.extractor.extract.call_count, 2)
 
     def test_process_clean_backs_up_reviewed_data_and_reprocesses_known_images(self):
         image = self.create_image()

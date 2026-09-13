@@ -3,7 +3,7 @@ from datetime import date
 from decimal import Decimal
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageOps
 
 from . import EXTRACTOR_VERSION
 
@@ -270,7 +270,7 @@ class ScreenshotExtractor:
             engine = RapidOCR()
         self.engine = engine
 
-    def recognize(self, image, regions):
+    def recognize(self, image, regions, integer_fields=()):
         crops = []
         evidence = {}
         for field, bounds in regions.items():
@@ -285,6 +285,44 @@ class ScreenshotExtractor:
             raise ValueError("OCR returned a different number of readings than supplied regions")
         for field, (text, confidence) in zip(regions, readings):
             evidence[field].update(raw_text=text, confidence=float(confidence))
+        retries = []
+        retry_fields = []
+        for field, crop in zip(regions, crops):
+            if field not in integer_fields or parse_integer(evidence[field]["raw_text"]) is not None:
+                continue
+            grayscale = Image.fromarray(crop[:, :, ::-1]).convert("L")
+            binary = grayscale.point(lambda value: 0 if value < 160 else 255)
+            bounds = ImageOps.invert(binary).getbbox()
+            if bounds is None or bounds[3] - bounds[1] < max(3, binary.height * 0.35):
+                continue
+            glyph = ImageOps.autocontrast(grayscale.crop(bounds))
+            glyph = glyph.resize((max(1, round(glyph.width * 48 / glyph.height)), 48), Image.Resampling.LANCZOS)
+            for copies in (3, 5):
+                strip = Image.new("L", ((glyph.width + 8) * copies + 8, 64), 255)
+                for index in range(copies):
+                    strip.paste(glyph, (8 + index * (glyph.width + 8), 8))
+                retries.append(np.asarray(strip.convert("RGB"))[:, :, ::-1].copy())
+                retry_fields.append((field, copies))
+        if retries:
+            recovered, elapsed = self.engine.text_recognizer(retries)
+            if len(recovered) != len(retry_fields):
+                raise ValueError("OCR returned a different number of numeric retry readings than supplied regions")
+            for (field, copies), (text, confidence) in zip(retry_fields, recovered):
+                evidence[field].setdefault("numeric_retry", []).append({
+                    "copies": copies, "raw_text": text, "confidence": float(confidence),
+                })
+            for field in dict.fromkeys(field for field, copies in retry_fields):
+                readings = evidence[field]["numeric_retry"]
+                valid = [reading for reading in readings if reading["confidence"] >= 0.6
+                         and len(reading["raw_text"]) == reading["copies"]
+                         and re.fullmatch(r"[0-9]+", reading["raw_text"])
+                         and len(set(reading["raw_text"])) == 1]
+                if len(valid) == 2 and valid[0]["raw_text"][0] == valid[1]["raw_text"][0]:
+                    evidence[field]["initial_reading"] = {
+                        "raw_text": evidence[field]["raw_text"], "confidence": evidence[field]["confidence"],
+                    }
+                    evidence[field].update(raw_text=valid[0]["raw_text"][0], confidence=min(reading["confidence"] for reading in valid),
+                                           method="rapidocr_repeated_digit_crop")
         return evidence
 
     def extract(self, path):
@@ -455,7 +493,8 @@ class ScreenshotExtractor:
         for field, center in TEAM_ROWS.items():
             regions[f"home.{field}"] = (728, center - 10, 759, center + 10)
             regions[f"away.{field}"] = (1213, center - 10, 1239, center + 10)
-        fields = self.recognize(image, regions)
+        integer_fields = {f"{side}.{field}" for side in ("home", "away") for field in TEAM_ROWS if not field.endswith("_pct")}
+        fields = self.recognize(image, regions, integer_fields)
         record = {"type": "match", **parse_header(fields["header"]["raw_text"])}
         for side in ("home", "away"):
             record[f"{side}_club"] = club_name(fields[f"{side}_club"]["raw_text"])
@@ -490,7 +529,8 @@ class ScreenshotExtractor:
             width = 100 if "/" in field else (66 if grouped else 26)
             regions[field] = (right - width, center - (11 if grouped else 10),
                               right, center + (12 if grouped else 10))
-        fields = self.recognize(image, regions)
+        integer_fields = {field for field in rows if "/" not in field and not field.endswith("_pct")}
+        fields = self.recognize(image, regions, integer_fields)
         record = {
             "type": "player_match", "match_id": None,
             "player": " ".join(fields[field]["raw_text"].strip() for field in ("first_name", "last_name")),

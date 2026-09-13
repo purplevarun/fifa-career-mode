@@ -359,6 +359,72 @@ export function playerSummary(
 		snapshots,
 	};
 }
+export type OverviewStatistic =
+	| "goals"
+	| "assists"
+	| "appearances"
+	| "passes_completed"
+	| "tackles_won"
+	| "rating";
+
+export interface PlayerRanking {
+	id: string;
+	name: string;
+	value: number;
+	known: number;
+	total: number;
+}
+
+export function overviewRankings(model: Model, matches: Match[]) {
+	const players = model.data.players
+		.map((player) => playerSummary(model, player, matches))
+		.filter((player) => player.appearances > 0);
+	const statistics: OverviewStatistic[] = [
+		"goals",
+		"assists",
+		"appearances",
+		"passes_completed",
+		"tackles_won",
+		"rating",
+	];
+	return Object.fromEntries(
+		statistics.map((statistic) => [
+			statistic,
+			players
+				.flatMap((player) => {
+					const measured =
+						statistic === "appearances"
+							? {
+									value: player.appearances,
+									known: player.appearances,
+									total: player.appearances,
+								}
+							: performanceMetric(player.rows, statistic);
+					const value =
+						statistic === "rating" ? player.rating : measured.value;
+					return value === null
+						? []
+						: [
+								{
+									id: player.id,
+									name: player.name,
+									value,
+									known: measured.known,
+									total: measured.total,
+								},
+							];
+				})
+				.sort(
+					(left, right) =>
+						right.value - left.value ||
+						left.name.localeCompare(right.name) ||
+						left.id.localeCompare(right.id),
+				)
+				.slice(0, 5),
+		]),
+	) as Record<OverviewStatistic, PlayerRanking[]>;
+}
+
 export function referenceLabel(
 	model: Model,
 	field: string,

@@ -512,16 +512,78 @@
 
 	.overview-charts {
 		display: grid;
-		grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
-		gap: 30px;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 0;
 		margin-top: 30px;
-		border-bottom: 1px solid var(--line);
-		padding-bottom: 27px;
+		border-top: 1px solid var(--line);
 	}
 
-	.overview-charts>section+section {
+	.overview-ranking {
+		min-width: 0;
+		padding: 24px 20px 12px;
+		border-bottom: 1px solid var(--line);
+		animation: ranking-enter 280ms ease-out both;
+	}
+
+	.overview-ranking:nth-child(2n) {
 		border-left: 1px solid var(--line);
-		padding-left: 27px;
+	}
+
+	.ranking-kicker {
+		color: var(--ranking-accent);
+		font-size: 10px;
+		font-weight: 600;
+		text-transform: uppercase;
+		line-height: 16px;
+	}
+
+	.overview-ranking .section-heading {
+		min-height: 52px;
+		margin-bottom: 8px;
+		gap: 10px;
+	}
+
+	.overview-ranking h2 {
+		font-size: 22px;
+		line-height: 1.12;
+	}
+
+	.ranking-link {
+		flex-shrink: 0;
+		width: 30px;
+		height: 30px;
+		color: var(--ranking-accent);
+	}
+
+	.ranking-chart .empty {
+		min-height: 0;
+		padding: 40px 12px;
+	}
+
+	.ranking-note {
+		min-height: 16px;
+		font-size: 10px;
+		color: var(--muted);
+	}
+
+	.ranking-tooltip {
+		display: grid;
+		gap: 5px;
+		max-width: 230px;
+		padding: 10px 12px;
+		background: white;
+		border: 1px solid var(--line);
+		border-radius: 4px;
+		font-size: 12px;
+	}
+
+	.ranking-tooltip small {
+		color: var(--muted);
+	}
+
+	@keyframes ranking-enter {
+		from { opacity: 0; transform: translateY(6px); }
+		to { opacity: 1; transform: translateY(0); }
 	}
 
 	.overview-lower {
@@ -1820,9 +1882,28 @@
 			padding-right: 52px;
 		}
 
-		.overview-charts,
 		.overview-lower {
 			grid-template-columns: minmax(0, 1.65fr) minmax(0, 1fr);
+		}
+	}
+
+	@media (min-width: 1360px) {
+		.overview-charts {
+			grid-template-columns: repeat(3, minmax(0, 1fr));
+		}
+
+		.overview-ranking:nth-child(n) {
+			border-left: 1px solid var(--line);
+		}
+
+		.overview-ranking:nth-child(3n + 1) {
+			border-left: 0;
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.overview-ranking {
+			animation: none;
 		}
 	}
 
@@ -1896,17 +1977,19 @@
 	}
 
 	@media (max-width: 940px) {
-		.overview-charts,
 		.overview-lower {
 			grid-template-columns: minmax(0, 1fr);
 			gap: 25px;
 		}
 
-		.overview-charts>section+section {
+		.overview-charts {
+			grid-template-columns: minmax(0, 1fr);
+		}
+
+		.overview-ranking:nth-child(n) {
 			border-left: 0;
 			padding-left: 0;
-			padding-top: 20px;
-			border-top: 1px solid var(--line);
+			padding-right: 0;
 		}
 
 		.latest-match {

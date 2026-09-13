@@ -27,6 +27,35 @@ test("overview preserves filters, preseason and mobile navigation", async ({
 	await expect(
 		page.getByText("4 recorded matches", { exact: true }),
 	).toBeVisible();
+	await expect(page.locator(".overview-ranking")).toHaveCount(6);
+	for (const title of [
+		"Leading scorers",
+		"Most assists",
+		"Most appearances",
+		"Most passes completed",
+		"Most tackles won",
+		"Highest rated players",
+	]) {
+		await expect(
+			page.getByRole("heading", { name: title, exact: true }),
+		).toBeVisible();
+	}
+	await expect(
+		page.getByRole("heading", {
+			name: "Goals across the career",
+			exact: true,
+		}),
+	).toHaveCount(0);
+	expect(
+		await page
+			.locator("[data-ranking-count]")
+			.evaluateAll((charts) =>
+				charts.every(
+					(chart) =>
+						Number(chart.getAttribute("data-ranking-count")) <= 5,
+				),
+			),
+	).toBe(true);
 	await page.getByRole("checkbox", { name: "Include preseason" }).click();
 	await expect(
 		page.getByText("3 recorded matches", { exact: true }),
@@ -190,8 +219,12 @@ test("verification exposes partial comparisons and the goal warning", async ({
 	await page.keyboard.press("Escape");
 	await page.getByRole("tab", { name: "Warnings (1)" }).click();
 	await expect(page.locator(".warning-record")).toContainText("Portsmouth");
-	await expect(page.locator(".warning-record")).toContainText("Player goals exceed team score");
-	await expect(page.locator(".warning-record")).not.toContainText("undefined");
+	await expect(page.locator(".warning-record")).toContainText(
+		"Player goals exceed team score",
+	);
+	await expect(page.locator(".warning-record")).not.toContainText(
+		"undefined",
+	);
 	await page.getByRole("link", { name: "Open match" }).click();
 	await expect(page.locator(".notice.warning")).toContainText(
 		"Credited player goals: 2",

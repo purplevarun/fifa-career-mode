@@ -64,6 +64,35 @@ def select_sources(connection, sequences=None, source_ids=None):
     return list(selected.values())
 
 
+def needs_numeric_refresh(connection, source, evidence_json):
+    readings = json.loads(evidence_json).get("fields", {})
+    if not readings or source["status"] == "rejected":
+        return False
+    from .extraction import GOALKEEPER_ROWS, OUTFIELD_ROWS, TEAM_ROWS, parse_integer
+
+    if source["screen_type"] == "match_facts":
+        fields = TEAM_ROWS
+        records = connection.execute(
+            "SELECT team.*, CASE WHEN team.club_id = fixture.home_club_id THEN 'home' ELSE 'away' END AS side "
+            "FROM team_matches AS team JOIN matches AS fixture ON fixture.id = team.match_id "
+            "JOIN match_sources AS source ON source.match_id = team.match_id WHERE source.source_id = ?", (source["id"],),
+        ).fetchall()
+    else:
+        fields = GOALKEEPER_ROWS if source["screen_type"] == "goalkeeper_performance" else OUTFIELD_ROWS
+        records = connection.execute(
+            "SELECT appearance.* FROM player_matches AS appearance JOIN player_match_sources AS source "
+            "ON source.player_match_id = appearance.id WHERE source.source_id = ?", (source["id"],),
+        ).fetchall()
+    for record in records:
+        for field in fields:
+            if "/" in field or field.endswith("_pct") or record[field] is not None:
+                continue
+            key = f"{record['side']}.{field}" if source["screen_type"] == "match_facts" else field
+            if key in readings and parse_integer(readings[key].get("raw_text", "")) is None:
+                return True
+    return False
+
+
 def extract_pending(connection, root, sequences=None, limit=None, reextract=False, extractor=None, progress=None):
     if limit is not None and limit < 1:
         raise ValueError("The extraction limit must be at least one")
@@ -73,6 +102,9 @@ def extract_pending(connection, root, sequences=None, limit=None, reextract=Fals
     for source in sources:
         existing = connection.execute("SELECT extractor_version, evidence_json FROM extractions WHERE source_id = ?", (source["id"],)).fetchone()
         updated_layout = existing and existing["extractor_version"] != EXTRACTOR_VERSION and source["screen_type"] in NON_MATCH_SCREEN_TYPES
+        if (existing and existing["extractor_version"] != EXTRACTOR_VERSION
+                and source["screen_type"] in {"match_facts", "player_performance", "goalkeeper_performance"}):
+            updated_layout = needs_numeric_refresh(connection, source, existing["evidence_json"])
         if existing and existing["extractor_version"] != EXTRACTOR_VERSION and source["screen_type"] == "dashboard":
             from .extraction import classify
 
@@ -164,6 +196,15 @@ def make_review(connection, sequences=None, match_id=None, source_ids=None):
         records = previous["records"] if previous else candidates
         complete = previous["complete"] if previous else False
         issues = json.loads(extraction["issues_json"])
+        if (previous and source["screen_type"] == "match_facts" and len(records) == len(candidates) == 1
+                and records[0].get("type") == candidates[0].get("type") == "match"):
+            for side, stats in candidates[0].get("team_stats", {}).items():
+                saved_stats = records[0].setdefault("team_stats", {}).setdefault(side, {})
+                additions = {field: value for field, value in stats.items() if saved_stats.get(field) is None and value is not None}
+                if additions:
+                    saved_stats.update(additions)
+                    complete = False
+                    issues.append(f"New {side} team fields were added from OCR; existing scores, fixture identity and saved values are retained.")
         if (previous and source["screen_type"] in {"player_performance", "goalkeeper_performance"}
                 and len(records) == len(candidates) == 1
                 and records[0].get("type") == candidates[0].get("type") == "player_match"):

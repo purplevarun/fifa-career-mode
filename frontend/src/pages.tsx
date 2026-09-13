@@ -1,12 +1,13 @@
 import {
 	ArrowLeft,
 	ArrowRight,
+	ArrowUpRight,
 	CalendarDays,
 	MapPin,
 	Shield,
 	Trophy,
 } from "lucide-react";
-import { useState } from "react";
+import { type CSSProperties, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { RankingChart, TrendChart } from "./charts";
 import { useCareer } from "./context";
@@ -15,6 +16,7 @@ import {
 	dateLabel,
 	display,
 	label,
+	overviewRankings,
 	performanceGroups,
 	performanceMetric,
 	playerSummary,
@@ -162,16 +164,55 @@ export function MatchTable({
 	);
 }
 
+const overviewCharts = [
+	{
+		statistic: "goals",
+		title: "Leading scorers",
+		name: "Goals",
+		color: "#276f54",
+		variant: "bar",
+	},
+	{
+		statistic: "assists",
+		title: "Most assists",
+		name: "Assists",
+		color: "#356a9a",
+		variant: "bar",
+	},
+	{
+		statistic: "appearances",
+		title: "Most appearances",
+		name: "Appearances",
+		color: "#555b66",
+		variant: "bar",
+	},
+	{
+		statistic: "passes_completed",
+		title: "Most passes completed",
+		name: "Completed passes",
+		color: "#167d7f",
+		variant: "bar",
+	},
+	{
+		statistic: "tackles_won",
+		title: "Most tackles won",
+		name: "Tackles won",
+		color: "#a04d67",
+		variant: "lollipop",
+	},
+	{
+		statistic: "rating",
+		title: "Highest rated players",
+		name: "Average match rating",
+		color: "#9d731b",
+		variant: "rating",
+	},
+] as const;
+
 export function Overview() {
 	const { model, matches } = useCareer();
 	const summary = summarize(matches);
-	const leaders = model.data.players
-		.map((player) => playerSummary(model, player, matches))
-		.filter((player) => (player.goals.value ?? 0) > 0)
-		.sort(
-			(left, right) => (right.goals.value ?? 0) - (left.goals.value ?? 0),
-		)
-		.slice(0, 6);
+	const rankings = overviewRankings(model, matches);
 	const latest = matches.at(-1);
 	return (
 		<>
@@ -215,49 +256,51 @@ export function Overview() {
 			) : (
 				<>
 					<div className="overview-charts">
-						<section>
-							<SectionHeading title="Goals across the career">
-								<span className="tiny muted">
-									{matches[0]?.played_on} to{" "}
-									{latest?.played_on}
-								</span>
-							</SectionHeading>
-							<TrendChart
-								rows={matches.map((match) => ({
-									label: dateLabel(match.played_on, true),
-									scored: match.goalsFor,
-									conceded: match.goalsAgainst,
-								}))}
-								series={[
+						{overviewCharts.map((chart, index) => (
+							<section
+								className="overview-ranking"
+								key={chart.statistic}
+								aria-label={chart.title}
+								data-statistic={chart.statistic}
+								style={
 									{
-										key: "scored",
-										name: "Scored",
-										color: "#247451",
-									},
-									{
-										key: "conceded",
-										name: "Conceded",
-										color: "#c2754c",
-									},
-								]}
-							/>
-						</section>
-						<section>
-							<SectionHeading title="Leading scorers">
-								<CareerLink
-									to="/players"
-									className="small-link"
-								>
-									All players <ArrowRight size={14} />
-								</CareerLink>
-							</SectionHeading>
-							<RankingChart
-								rows={leaders.map((player) => ({
-									name: player.name,
-									value: player.goals.value!,
-								}))}
-							/>
-						</section>
+										"--ranking-accent": chart.color,
+										animationDelay: `${index * 40}ms`,
+									} as CSSProperties
+								}
+							>
+								<div className="ranking-kicker">
+									{chart.statistic === "rating"
+										? "Top 5 / average match rating"
+										: "Top 5"}
+								</div>
+								<SectionHeading title={chart.title}>
+									<CareerLink
+										to={
+											chart.statistic ===
+												"passes_completed" ||
+											chart.statistic === "tackles_won"
+												? `/players?stat=${chart.statistic}`
+												: "/players"
+										}
+										className="icon-button ranking-link"
+										aria-label={`View players: ${chart.title.toLowerCase()}`}
+										title={`View players: ${chart.title.toLowerCase()}`}
+									>
+										<ArrowUpRight size={16} />
+									</CareerLink>
+								</SectionHeading>
+								<RankingChart
+									rows={rankings[chart.statistic]}
+									name={chart.name}
+									color={chart.color}
+									variant={chart.variant}
+									digits={
+										chart.statistic === "rating" ? 2 : 0
+									}
+								/>
+							</section>
+						))}
 					</div>
 					<div className="overview-lower">
 						<section>
@@ -450,10 +493,6 @@ export function MatchDetail() {
 	const warnings = model.data.match_coverage.warnings.filter(
 		(row) => row.match_id === match.id,
 	);
-	const coverage = model.data.match_coverage.matches?.find(
-		(row) => row.match_id === match.id,
-	);
-	const assumedOwnGoals = Number(coverage?.assumed_own_goals ?? 0);
 	const columns: Column<Performance>[] = [
 		{
 			key: "player_id",
@@ -552,22 +591,6 @@ export function MatchDetail() {
 				</span>
 				<div className="grow" />
 			</div>
-			{assumedOwnGoals > 0 && (
-				<div className="notice positive">
-					<div>
-						<strong>
-							Assumed opponent own goals:{" "}
-							{display(assumedOwnGoals)}
-						</strong>
-						<p>
-							Team goals: {display(coverage?.team_goals)}.
-							Credited player goals:{" "}
-							{display(coverage?.credited_player_goals)}.
-							Individual goal credits unchanged.
-						</p>
-					</div>
-				</div>
-			)}
 			{warnings.map((warning, index) => (
 				<div className="notice warning" key={index}>
 					<div>

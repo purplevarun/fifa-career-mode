@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useDeferredValue, useEffect, useRef, useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, parsePath, useLocation } from "react-router-dom";
 import { useCareer } from "./context";
 import type { Match, Row } from "./data";
 import { display, downloadJson, label, referenceLabel } from "./data";
@@ -25,8 +25,17 @@ export function CareerLink({
 	title?: string;
 }) {
 	const location = useLocation();
+	const destination = parsePath(to);
+	const parameters = new URLSearchParams(location.search);
+	for (const [key, value] of new URLSearchParams(destination.search)) {
+		parameters.set(key, value);
+	}
+	const search = parameters.toString();
 	return (
-		<Link to={`${to}${location.search}`} {...props}>
+		<Link
+			to={{ ...destination, search: search ? `?${search}` : "" }}
+			{...props}
+		>
 			{children}
 		</Link>
 	);
@@ -230,10 +239,10 @@ export function DataTable<Value extends Row>({
 	const text = deferredQuery.trim().toLocaleLowerCase();
 	const filtered = text
 		? rows.filter((row) =>
-			(searchText?.(row) ?? JSON.stringify(row))
-				.toLocaleLowerCase()
-				.includes(text),
-		)
+				(searchText?.(row) ?? JSON.stringify(row))
+					.toLocaleLowerCase()
+					.includes(text),
+			)
 		: rows;
 	const column = columns.find((column) => column.key === sort.key);
 	const valueOf = (row: Value) =>
@@ -247,8 +256,8 @@ export function DataTable<Value extends Row>({
 			typeof first === "number" && typeof second === "number"
 				? first - second
 				: String(first).localeCompare(String(second), undefined, {
-					numeric: true,
-				});
+						numeric: true,
+					});
 		return sort.desc ? -comparison : comparison;
 	});
 	const pages = Math.max(1, Math.ceil(sorted.length / size)),
@@ -329,8 +338,8 @@ export function DataTable<Value extends Row>({
 														sort.key === column.key
 															? !sort.desc
 															: Boolean(
-																column.numeric,
-															),
+																	column.numeric,
+																),
 												});
 												setPage(0);
 											}}
@@ -370,18 +379,18 @@ export function DataTable<Value extends Row>({
 												{column.render
 													? column.render(row)
 													: display(
-														column.value?.(
-															row,
-														) ??
-														row[column.key],
-													)}
+															column.value?.(
+																row,
+															) ??
+																row[column.key],
+														)}
 											</button>
 										) : column.render ? (
 											column.render(row)
 										) : (
 											display(
 												column.value?.(row) ??
-												row[column.key],
+													row[column.key],
 											)
 										)}
 									</td>

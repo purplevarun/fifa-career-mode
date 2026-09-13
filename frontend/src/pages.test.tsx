@@ -15,6 +15,7 @@ import {
 	PlayerDetail,
 	Players,
 } from "./pages";
+import { CareerLink } from "./ui";
 
 const model = createModel(fixture);
 
@@ -150,7 +151,7 @@ describe("local stats pages", () => {
 		}
 	});
 
-	it("labels assumed opponent own goals without creating an open warning", () => {
+	it("keeps own-goal reconciliation data without displaying assumption notices", () => {
 		const match = fixture.matches[1];
 		const assumed = createModel({
 			...fixture,
@@ -201,13 +202,17 @@ describe("local stats pages", () => {
 					</CareerContext>
 				</MemoryRouter>,
 			);
-			expect(html).toContain("Assumed opponent own goals: 1");
-			expect(html).toContain("Team goals: 1. Credited player goals: 0.");
-			expect(html).toContain("Individual goal credits unchanged.");
+			expect(html).not.toContain("Assumed opponent own goals");
+			expect(html).not.toContain("Team goals: 1. Credited player goals: 0.");
+			expect(html).not.toContain("Individual goal credits unchanged.");
 			expect(html).not.toContain("undefined");
 			expect(html).not.toContain('class="warning-record"');
 			expect(html).not.toContain('class="notice warning"');
+			if (view.path === "/audit") {
+				expect(html).toContain("No reconciliation warnings");
+			}
 		}
+		expect(assumed.data.match_coverage.summary.assumed_own_goals).toBe(1);
 	});
 
 	it.each(["passes_completed", "key_passes", "interceptions"])(
@@ -252,6 +257,73 @@ describe("local stats pages", () => {
 			expect(html).not.toContain("Test Opponent");
 		},
 	);
+
+	it("merges chart statistics with active filters in player links", () => {
+		const html = renderToStaticMarkup(
+			<MemoryRouter
+				initialEntries={[
+					"/?season=first&competition=league&preseason=false&stat=goals",
+				]}
+			>
+				<CareerLink to="/players?stat=passes_completed">
+					Passing
+				</CareerLink>
+				<CareerLink to="/players?stat=tackles_won#rankings">
+					Tackles
+				</CareerLink>
+			</MemoryRouter>,
+		);
+		expect(html).toContain(
+			'href="/players?season=first&amp;competition=league&amp;preseason=false&amp;stat=passes_completed"',
+		);
+		expect(html).toContain(
+			'href="/players?season=first&amp;competition=league&amp;preseason=false&amp;stat=tackles_won#rankings"',
+		);
+		expect(html).not.toContain("passes_completed?");
+	});
+
+	it("replaces the overview goal trend with six player ranking charts", () => {
+		const ranked = createModel({
+			...fixture,
+			player_matches: fixture.player_matches.map((row) => ({
+				...row,
+				passes_completed_short: 5,
+				passes_completed_medium: 2,
+				passes_completed_long: 1,
+				tackles_won: 3,
+			})),
+		});
+		const html = renderToStaticMarkup(
+			<MemoryRouter initialEntries={["/"]}>
+				<CareerContext
+					value={{
+						model: ranked,
+						filters: defaultFilters,
+						matches: ranked.matches,
+					}}
+				>
+					<Overview />
+				</CareerContext>
+			</MemoryRouter>,
+		);
+		for (const title of [
+			"Leading scorers",
+			"Most assists",
+			"Most appearances",
+			"Most passes completed",
+			"Most tackles won",
+			"Highest rated players",
+		]) {
+			expect(html).toContain(title);
+		}
+		expect(html).not.toContain("Goals across the career");
+		expect(html.match(/data-ranking-count=/g)).toHaveLength(6);
+		expect(html).toContain('data-ranking-variant="lollipop"');
+		expect(html).toContain('data-ranking-variant="rating"');
+		expect(html).toContain("Average match rating by player");
+		expect(html).toContain("/players?stat=passes_completed");
+		expect(html).toContain("/players?stat=tackles_won");
+	});
 
 	it.each([
 		{

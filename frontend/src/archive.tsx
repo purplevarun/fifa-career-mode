@@ -383,10 +383,6 @@ export function Audit() {
 	);
 	const warnings = model.data.match_coverage.warnings;
 	const coverage = model.data.match_coverage.summary;
-	const ownGoalAssumptions =
-		model.data.match_coverage.matches?.filter(
-			(row) => Number(row.assumed_own_goals) > 0,
-		) ?? [];
 	const appearances = selectPerformances(model, model.matches);
 	const passing = performanceMetric(appearances, "passes_completed");
 	const keyPasses = performanceMetric(appearances, "key_passes");
@@ -648,32 +644,6 @@ export function Audit() {
 			)}
 			{tab === "warnings" && (
 				<div>
-					{ownGoalAssumptions.map((row) => (
-						<div
-							className="notice positive"
-							key={String(row.match_id)}
-						>
-							<Check size={18} />
-							<div>
-								<strong>
-									Assumed opponent own goals:{" "}
-									{display(row.assumed_own_goals)}
-								</strong>
-								<p>
-									<CareerLink to={`/matches/${row.match_id}`}>
-										{display(row.home_club)} /{" "}
-										{display(row.away_club)}
-									</CareerLink>
-								</p>
-								<p>
-									Team goals: {display(row.team_goals)}.
-									Credited player goals:{" "}
-									{display(row.credited_player_goals)}.
-									Individual goal credits unchanged.
-								</p>
-							</div>
-						</div>
-					))}
 					{warnings.length ? (
 						warnings.map((warning, index) => {
 							const match = model.matchById.get(

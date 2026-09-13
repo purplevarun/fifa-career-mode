@@ -33,6 +33,15 @@ of silently choosing another port. The dashboard reads the current SQLite
 database through a local `/api/stats` endpoint. There is no separate server to
 start and no JSON export or frontend rebuild needed when stats change.
 
+## Overview Rankings
+
+The overview shows the top five Notts County players for goals, assists,
+appearances, completed passes, tackles won, and average match rating. All six
+rankings follow the season, competition, and preseason filters. Ratings average
+only recorded match ratings, not player overall ratings. Passing totals require
+all three distance components for each counted appearance. Unknown measurements
+are excluded, partial totals are marked, and chart tooltips show record coverage.
+
 ## Player Statistics and Honours
 
 On **Players**, choose a season and use **Player statistic** to rank completed
@@ -64,6 +73,18 @@ required.** Click Reload in the dashboard after processing.
 Interrupted work resumes by rerunning the same command. Use `--limit 20` to OCR
 a smaller batch or `--reextract` to refresh OCR and fill missing stats. Neither
 option replaces existing non-null stats or saved corrections.
+
+Unreadable single-digit player and team counts get a contrast-normalized,
+enlarged-glyph retry.
+Three-copy and five-copy readings must agree before a digit is recovered; the
+original and retry readings remain in the OCR evidence. Blank or ambiguous cells
+stay unknown. Refreshing a match summary can now fill missing team statistics
+while preserving its saved score, fixture identity, and existing values.
+
+When the OCR version changes, normal processing also retries previously unreadable
+numeric cells whose linked player or team stats are still missing. Each source is
+retried once per version; existing corrections are retained, and sources without
+missing numeric values are not re-extracted unless `--reextract` is requested.
 
 Supported screens include:
 
@@ -170,8 +191,8 @@ unknown. Shootout scores stay separate from match goals, and cumulative season
 totals are not added to match totals.
 
 When the recorded player goal total is lower than the team score, the difference
-is treated as **assumed opponent own goals**. Verification and match details
-label this assumption separately from warnings. Team scores and individual player
+is treated as **assumed opponent own goals** by the reconciliation logic, without
+displaying an assumption notice. Team scores and individual player
 credits are never rewritten or assigned to an invented player. Excess player
 goal credits still produce a warning, and unknown goal totals stay unknown.
 Other warnings identify the fixture and the missing player or team statistics.

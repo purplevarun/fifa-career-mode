@@ -1,6 +1,7 @@
 import os
 import unittest
 from pathlib import Path
+from unittest.mock import Mock
 
 from PIL import Image
 
@@ -81,6 +82,63 @@ class ParsingTests(unittest.TestCase):
         for title in ("EFL League Two Player of the Month September shortlist", "King nominated for Player of the Month",
                       "Exeter City Fans Expect Promotion", "Player of the Competition Announced", "Team of the Competition Announced"):
             self.assertIsNone(parse_news_event(title))
+
+
+class NumericRecognitionTests(unittest.TestCase):
+    def setUp(self):
+        self.image = Image.new("RGB", (1366, 768), "white")
+        self.image.paste((70, 70, 70), (8, 3, 13, 17))
+        self.regions = {"assists": (0, 0, 30, 20)}
+
+    def test_agreeing_repeated_digits_preserve_initial_evidence(self):
+        for digit in ("0", "1"):
+            with self.subTest(digit=digit):
+                engine = Mock()
+                engine.text_recognizer.side_effect = [
+                    ([(".", 0.2)], 0), ([(digit * 3, 0.7), (digit * 5, 0.8)], 0),
+                ]
+                fields = ScreenshotExtractor(engine).recognize(self.image, self.regions, {"assists"})
+                self.assertEqual(fields["assists"]["raw_text"], digit)
+                self.assertEqual(fields["assists"]["initial_reading"], {"raw_text": ".", "confidence": 0.2})
+                self.assertEqual(fields["assists"]["method"], "rapidocr_repeated_digit_crop")
+                self.assertEqual(len(fields["assists"]["numeric_retry"]), 2)
+
+    def test_ambiguous_or_low_confidence_readings_are_not_numbers(self):
+        for readings in (
+            [("111", 0.9), ("77777", 0.9)],
+            [("000", 0.59), ("00000", 0.9)],
+            [("OOO", 0.9), ("OOOOO", 0.9)],
+            [("121212", 0.9), ("1212121212", 0.9)],
+            [("11", 0.9), ("11111", 0.9)],
+            [("", 0), ("11111", 0.9)],
+        ):
+            with self.subTest(readings=readings):
+                engine = Mock()
+                engine.text_recognizer.side_effect = [([(".", 0.2)], 0), (readings, 0)]
+                fields = ScreenshotExtractor(engine).recognize(self.image, self.regions, {"assists"})
+                self.assertIsNone(parse_integer(fields["assists"]["raw_text"]))
+                self.assertNotIn("initial_reading", fields["assists"])
+
+    def test_known_values_and_text_fields_are_not_retried(self):
+        for text, selected in (("7", {"assists"}), ("name", set())):
+            with self.subTest(text=text):
+                engine = Mock()
+                engine.text_recognizer.return_value = ([(text, 0.5)], 0)
+                fields = ScreenshotExtractor(engine).recognize(self.image, self.regions, selected)
+                self.assertEqual(fields["assists"]["raw_text"], text)
+                engine.text_recognizer.assert_called_once()
+
+    def test_blank_and_dash_cells_remain_unknown(self):
+        for mark in (False, True):
+            with self.subTest(mark=mark):
+                image = Image.new("RGB", (1366, 768), "white")
+                if mark:
+                    image.paste((70, 70, 70), (8, 9, 20, 11))
+                engine = Mock()
+                engine.text_recognizer.return_value = ([("-", 0.5)], 0)
+                fields = ScreenshotExtractor(engine).recognize(image, self.regions, {"assists"})
+                self.assertIsNone(parse_integer(fields["assists"]["raw_text"]))
+                engine.text_recognizer.assert_called_once()
 
 
 class NonMatchExtractionTests(unittest.TestCase):
@@ -193,6 +251,42 @@ class ScreenshotTests(unittest.TestCase):
         self.assertEqual(record["shots_parried"], 2)
         self.assertEqual(record["crosses_caught"], 1)
         self.assertNotIn("goals", record)
+
+    def test_november_single_digit_stats_are_not_missing(self):
+        keeper = self.extract(1448, self.extractor.extract_player, goalkeeper=True)
+        self.assertEqual(keeper["player"], "Frederik Schram")
+        self.assertEqual(keeper["assists"], 0)
+        for sequence, played_on in ((1443, "2019-11-12"), (1457, "2019-11-16")):
+            with self.subTest(sequence=sequence):
+                match = self.extract(sequence, self.extractor.extract_match)
+                self.assertEqual(match["played_on"], played_on)
+                self.assertEqual(match["team_stats"]["home"]["corners"], 1)
+                self.assertEqual(match["team_stats"]["away"]["corners"], 1)
+                self.assertIsNotNone(match["team_stats"]["away"]["fouls"])
+
+    def test_remaining_warning_screens_have_numeric_values(self):
+        for sequence in (1460, 1477, 1489, 1506, 1522, 1538, 1550, 1563, 1576, 1595, 1609, 1610):
+            with self.subTest(goalkeeper=sequence):
+                player = self.extract(sequence, self.extractor.extract_player, goalkeeper=True)
+                self.assertEqual(player["assists"], 0)
+                self.assertEqual(player["clearances"], 0)
+        fields = ("shots", "shots_on_target", "possession_pct", "tackles", "fouls", "corners", "shot_accuracy_pct", "pass_accuracy_pct")
+        expected = {
+            1472: ((5, 1, 47, 5, 1, 1, 20, 88), (4, 3, 53, 10, 0, 0, 75, 90)),
+            1487: ((7, 4, 44, 6, 2, 1, 57, 86), (6, 2, 56, 2, 0, 2, 33, 78)),
+            1503: ((12, 7, 57, 5, 1, 4, 58, 85), (5, 3, 43, 11, 2, 1, 60, 83)),
+            1517: ((4, 0, 47, 6, 0, 2, 0, 87), (8, 5, 53, 6, 0, 1, 62, 86)),
+            1531: ((6, 3, 52, 7, 0, 5, 50, 71), (1, 1, 48, 3, 0, 0, 100, 85)),
+            1558: ((2, 1, 52, 6, 0, 1, 50, 91), (4, 2, 48, 6, 1, 2, 50, 80)),
+            1574: ((8, 2, 51, 7, 1, 0, 25, 88), (9, 5, 49, 12, 1, 0, 55, 91)),
+            1590: ((7, 5, 41, 5, 2, 2, 71, 82), (10, 8, 59, 5, 2, 1, 80, 84)),
+            1605: ((2, 2, 45, 6, 0, 0, 100, 82), (3, 1, 55, 7, 3, 1, 33, 80)),
+        }
+        for sequence, values in expected.items():
+            with self.subTest(match=sequence):
+                match = self.extract(sequence, self.extractor.extract_match)
+                for side, expected_stats in zip(("home", "away"), values):
+                    self.assertEqual(match["team_stats"][side], dict(zip(fields, expected_stats)))
 
     def test_squad_overall_snapshots(self):
         first = self.extract(70, self.extractor.extract_snapshot)
