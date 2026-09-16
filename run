@@ -33,7 +33,8 @@ case "$command_name" in
       printf '%s\n' 'The process command accepts no arguments. Use ./run process.' >&2
       exit 2
     fi
-    exec python3 -m processing process
+    python3 -m processing process
+    python3 -m processing export --output "$FRONTEND_DIR/public/data/dashboard.json"
     ;;
   format)
     if [ "$#" -ne 0 ]; then

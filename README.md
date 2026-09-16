@@ -131,6 +131,11 @@ identical file contents are deduplicated within the new scan. Entity UUIDs and
 processing history are regenerated on every run. Original screenshots and source
 code are not deleted or rewritten.
 
+After a successful rebuild, the launcher automatically exports the same
+dashboard dataset as `frontend/public/data/dashboard.json`. This static JSON
+file is ignored as a generated artifact and can be bundled by a GitHub Pages
+build; failed or partial rebuilds do not overwrite it.
+
 **No flags and no review or approval step are required.** The former `--clean`,
 `--reextract`, `--limit`, and `--screenshots` options are rejected before deletion,
 as are any other arguments to `./run process`. The command always writes the main

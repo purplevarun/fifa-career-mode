@@ -2529,7 +2529,19 @@ class CommandTests(DatabaseTestCase):
         result = self.launcher("process")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
-            result.stdout.splitlines(), [str(repository), "-m", "processing", "process"]
+            result.stdout.splitlines(),
+            [
+                str(repository),
+                "-m",
+                "processing",
+                "process",
+                str(repository),
+                "-m",
+                "processing",
+                "export",
+                "--output",
+                str(repository / "frontend" / "public" / "data" / "dashboard.json"),
+            ],
         )
 
     def test_launcher_process_rejects_every_extra_argument(self):
