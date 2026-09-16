@@ -691,4 +691,39 @@ describe("local stats pages", () => {
 		expect(html).not.toContain("Cup winner");
 		expect(html).not.toContain("Date not recorded");
 	});
+	it("shows career and season leaders for braces and hat-tricks", () => {
+		const data = {
+			...fixture,
+			player_matches: fixture.player_matches.map((row) =>
+				row.id.endsWith("000000000031")
+					? {
+							...row,
+							player_id: fixture.players[0].id,
+							match_id: fixture.matches[1].id,
+							goals: 3,
+						}
+					: row,
+			),
+		};
+		const scoringModel = createModel(data);
+		const html = renderToStaticMarkup(
+			<MemoryRouter initialEntries={["/career?tab=events"]}>
+				<CareerContext
+					value={{
+						model: scoringModel,
+						filters: defaultFilters,
+						matches: scoringModel.matches,
+					}}
+				>
+					<CareerRecords />
+				</CareerContext>
+			</MemoryRouter>,
+		);
+		expect(html).toContain("Scoring feats");
+		expect(html).toContain("Career totals");
+		expect(html).toContain("Season by season");
+		expect(html).toContain("Braces");
+		expect(html).toContain("Hat-tricks");
+		expect(html).toContain("Test Forward");
+	});
 });
