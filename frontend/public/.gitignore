@@ -1,2 +1,3 @@
-data/
+data/*
+!data/dashboard.json
 evidence/

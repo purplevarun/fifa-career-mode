@@ -417,6 +417,29 @@ def normalized_name(value):
     return " ".join(value.split())
 
 
+def normalize_nationality(value):
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError("A nationality must be a string")
+    nationality = " ".join(value.split())
+    if not nationality:
+        return None
+    nationality = re.sub(
+        r"^(?:Age\s+\d+\s+\d+\s+|Age\s+\d+\s+|ge\s+\d+\s+Ip\s+)",
+        "",
+        nationality,
+        flags=re.IGNORECASE,
+    )
+    nationality = re.sub(r"^(?:\d+\s+)+", "", nationality)
+    nationality = re.sub(r"^\s*\d+\s+", "", nationality)
+    nationality = re.sub(r"\s+\d+\s+", " ", nationality)
+    nationality = re.sub(r"\s+\d+$", "", nationality)
+    if country := re.search(r"([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)*)$", nationality):
+        nationality = country.group(1)
+    return nationality or None
+
+
 def ensure_club(connection, name):
     name = normalized_name(name)
     alias = name.casefold()
@@ -468,7 +491,9 @@ def ensure_player(connection, record):
         (alias, player_id),
     )
     if record.get("nationality"):
-        nationality = normalized_name(record["nationality"])
+        nationality = normalize_nationality(record["nationality"])
+        if nationality is None:
+            return player_id
         current = connection.execute(
             "SELECT nationality FROM players WHERE id = ?", (player_id,)
         ).fetchone()[0]
@@ -1438,6 +1463,8 @@ def build_dataset(connection):
             for row in connection.execute(f"SELECT * FROM {table} ORDER BY {ordering}")
         ]
         for row in rows:
+            if table == "players" and row.get("nationality") is not None:
+                row["nationality"] = normalize_nationality(row["nationality"])
             for field in BOOLEAN_FIELDS & row.keys():
                 if row[field] is not None:
                     row[field] = bool(row[field])

@@ -16,6 +16,19 @@ export async function loadCareerDataset(
 	return (await response.json()) as Dataset;
 }
 
+export async function loadStaticCareerDataset(
+	fetcher: DatasetFetcher,
+	url: string,
+	signal: AbortSignal,
+): Promise<Dataset> {
+	const response = await fetcher(url, { signal, cache: "no-store" });
+	if (!response.ok)
+		throw new Error(
+			`Static career data request failed (${response.status}).`,
+		);
+	return (await response.json()) as Dataset;
+}
+
 export function watchCareerDataset(
 	fetcher: DatasetFetcher,
 	handlers: {

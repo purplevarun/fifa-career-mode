@@ -26,6 +26,7 @@ from processing.pipeline import (
     approve_review,
     backup_database,
     dashboard_data,
+    ensure_player,
     ensure_club,
     ensure_edition,
     ensure_season,
@@ -124,6 +125,28 @@ class DatabaseTests(DatabaseTestCase):
         self.assertEqual(report["summary"]["matches"], 0)
         self.assertEqual(report["summary"]["minimum_player_records_per_match"], 0)
         self.assertEqual(report["warnings"], [])
+
+    def test_player_nationality_ignores_ocr_prefix_noise(self):
+        for name, raw_nationality, expected in (
+            ("Takefusa Kubo", "ge 17 Ip Japan", "Japan"),
+            ("Thembinkosi Lorch", "Age 25 1 South Africa", "South Africa"),
+        ):
+            with self.subTest(name=name):
+                player_id = insert_entity(self.connection, "players", {"name": name})
+                ensure_player(
+                    self.connection,
+                    {
+                        "player_id": player_id,
+                        "player": name,
+                        "nationality": raw_nationality,
+                    },
+                )
+                self.assertEqual(
+                    self.connection.execute(
+                        "SELECT nationality FROM players WHERE id = ?", (player_id,)
+                    ).fetchone()[0],
+                    expected,
+                )
 
     def test_dashboard_contains_stats_without_screenshot_references(self):
         self.create_image()

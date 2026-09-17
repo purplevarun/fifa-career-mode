@@ -12,6 +12,8 @@ dist
 dist-ssr
 *.local
 public/data/
+!public/data/
+!public/data/dashboard.json
 public/evidence/
 test-results/
 playwright-report/
