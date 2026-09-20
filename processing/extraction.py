@@ -16,6 +16,8 @@ COMPETITION_LABELS = {
     "invitationalcup": "Invitational Cup",
     "eflleaguetwo": "EFL League Two",
     "eflleagueone": "EFL League One",
+    "lgtwoplayoffs": "EFL League Two Play-Offs",
+    "lgoneplayoffs": "EFL League One Play-Offs",
     "carabaocup": "Carabao Cup",
     "checkatradetrophy": "Checkatrade Trophy",
     "theemiratesfacup": "FA Cup",
@@ -114,6 +116,10 @@ def classify(text):
         return "news"
     if "congratulations" in normalized and "winner" in normalized:
         return "competition_result"
+    if "scoresfixtures" in normalized and (
+        "changecompetition" in normalized or "pickcompetition" in normalized
+    ):
+        return "league_table"
     if "standings" in normalized:
         if (
             re.search(
@@ -128,6 +134,14 @@ def classify(text):
             return "dashboard_award"
         return "dashboard"
     return "unknown"
+
+
+def ordinal(number):
+    if 10 <= number % 100 <= 20:
+        suffix = "th"
+    else:
+        suffix = {1: "st", 2: "nd", 3: "rd"}.get(number % 10, "th")
+    return f"{number}{suffix}"
 
 
 def parse_integer(text):
@@ -653,6 +667,9 @@ class ScreenshotExtractor:
             issues.append(
                 "The winner screen does not show its season or exact announcement date."
             )
+        elif screen_type == "league_table":
+            records, fields, table_issues = self.extract_league_table(image, tokens)
+            issues.extend(table_issues)
         else:
             return {
                 "screen_type": screen_type,
@@ -861,6 +878,88 @@ class ScreenshotExtractor:
                 "description": f"{winner} won {fields['competition']['raw_text']}.",
             }
         ], fields
+
+    def extract_league_table(self, image, tokens):
+        fields = detected_fields(
+            tokens,
+            {"competition_panel": (110, 70, 380, 120)},
+        )
+        competition = parse_header(fields["competition_panel"]["raw_text"])[
+            "competition"
+        ]
+        row = next(
+            (
+                token
+                for token in tokens
+                if compact(token["text"]).replace("0", "o").startswith("notts")
+            ),
+            None,
+        )
+        if row is None or not competition:
+            return (
+                [],
+                fields,
+                [
+                    "Notts County's row or the competition name is not visible on this table; "
+                    "scroll to reveal both before capturing."
+                ],
+            )
+        center = (
+            sum(point[1] for point in row["box"]) / len(row["box"]) * BASE_HEIGHT
+        )
+        columns = {
+            "position": (78, 108),
+            "played": (490, 528),
+            "won": (546, 584),
+            "drawn": (603, 641),
+            "lost": (659, 697),
+            "goals_for": (716, 754),
+            "goals_against": (773, 811),
+            "points": (831, 869),
+        }
+        fields.update(
+            self.recognize(
+                image,
+                {
+                    field: (left, center - 16, right, center + 16)
+                    for field, (left, right) in columns.items()
+                },
+                columns.keys(),
+            )
+        )
+        values = {field: parse_integer(fields[field]["raw_text"]) for field in columns}
+        if values["position"] is None or values["points"] is None:
+            return (
+                [],
+                fields,
+                ["The league table row for Notts County is not fully readable."],
+            )
+        description = (
+            f"Notts County finished {ordinal(values['position'])} in {competition} "
+            f"with {values['points']} points from {values['played']} games "
+            f"(W{values['won']} D{values['drawn']} L{values['lost']}, "
+            f"GF{values['goals_for']} GA{values['goals_against']})."
+        )
+        return (
+            [
+                {
+                    "type": "competition_event",
+                    "event_type": "league_table_position",
+                    "player": None,
+                    "club": "Notts County",
+                    "competition": competition,
+                    "season": None,
+                    "announced_on": None,
+                    "period": str(values["position"]),
+                    "description": description,
+                }
+            ],
+            fields,
+            [
+                "Final league position is read only from the visible standings row; "
+                "the season is inferred from surrounding dated screenshots, not this screen."
+            ],
+        )
 
     def extract_dashboard_award(self, image, tokens):
         fields = detected_fields(

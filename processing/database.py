@@ -17,6 +17,8 @@ COMPETITIONS = (
     ("Invitational Cup", "cup", True),
     ("EFL League Two", "league", False),
     ("EFL League One", "league", False),
+    ("EFL League Two Play-Offs", "cup", False),
+    ("EFL League One Play-Offs", "cup", False),
     ("Carabao Cup", "cup", False),
     ("Checkatrade Trophy", "cup", False),
     ("FA Cup", "cup", False),
